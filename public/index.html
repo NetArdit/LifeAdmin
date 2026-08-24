@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>LifeAdmin</title>
+  <meta name="description" content="LifeAdmin — a personal and family life operating system." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232f4d82'/%3E%3Ctext x='12' y='16.5' font-size='12' font-family='sans-serif' font-weight='700' fill='white' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560&display=swap" />
+  <link rel="stylesheet" href="/css/tokens.css" />
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/components.css" />
+  <link rel="stylesheet" href="/css/layout.css" />
+  <link rel="stylesheet" href="/css/pages.css" />
+  <script>
+    // Apply saved theme before paint to avoid a flash of the wrong theme.
+    try {
+      const t = localStorage.getItem('la-theme');
+      if (t && t !== 'system') document.documentElement.setAttribute('data-theme', t);
+    } catch {}
+  </script>
+</head>
+<body>
+  <div id="app" aria-live="polite"></div>
+  <div id="toast-root"></div>
+  <div id="modal-root"></div>
+  <div id="panel-root"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

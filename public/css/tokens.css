@@ -1,0 +1,159 @@
+/* LifeAdmin design tokens — a calm, trustworthy, professional palette.
+   Deliberately avoids purple-glow "AI generated" aesthetics. */
+:root {
+  /* Brand */
+  --brand-50: #eef3fb;
+  --brand-100: #d7e3f4;
+  --brand-200: #b0c7e9;
+  --brand-300: #82a4d8;
+  --brand-400: #5a80c0;
+  --brand-500: #3c60a0;
+  --brand-600: #2f4d82;
+  --brand-700: #263e69;
+  --brand-800: #1f3255;
+  --brand-900: #182645;
+
+  /* Accent (positive / eco / success) */
+  --accent-400: #4fae8e;
+  --accent-500: #2f8f6f;
+  --accent-600: #23735a;
+
+  /* Status */
+  --danger-400: #e5695a;
+  --danger-500: #d1453a;
+  --danger-600: #ad3730;
+  --warning-400: #eab04a;
+  --warning-500: #d99527;
+  --warning-600: #b3791b;
+  --info-500: #3c7fb0;
+
+  /* Priority accents */
+  --priority-critical: #d1453a;
+  --priority-high: #d99527;
+  --priority-medium: #3c7fb0;
+  --priority-low: #7c8794;
+
+  /* Neutrals — light mode */
+  --n-0: #ffffff;
+  --n-25: #fbfbfa;
+  --n-50: #f5f5f3;
+  --n-100: #ececea;
+  --n-150: #e2e2df;
+  --n-200: #d7d7d3;
+  --n-300: #bcbcb6;
+  --n-400: #96968f;
+  --n-500: #74746d;
+  --n-600: #57574f;
+  --n-700: #403f3a;
+  --n-800: #2b2a26;
+  --n-900: #1a1917;
+
+  /* Semantic — light mode (default) */
+  --bg: var(--n-25);
+  --bg-elevated: var(--n-0);
+  --bg-sunken: var(--n-50);
+  --bg-hover: var(--n-100);
+  --surface-border: var(--n-150);
+  --surface-border-strong: var(--n-200);
+
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-tertiary: var(--n-500);
+  --text-inverse: var(--n-0);
+  --text-on-brand: #ffffff;
+
+  --brand: var(--brand-600);
+  --brand-strong: var(--brand-700);
+  --brand-soft: var(--brand-50);
+  --brand-soft-border: var(--brand-100);
+
+  --focus-ring: 0 0 0 3px rgba(60, 96, 160, 0.35);
+  --shadow-sm: 0 1px 2px rgba(26, 25, 23, 0.06);
+  --shadow-md: 0 4px 14px rgba(26, 25, 23, 0.08);
+  --shadow-lg: 0 12px 32px rgba(26, 25, 23, 0.14);
+
+  /* Type scale */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.9375rem;
+  --fs-md: 1.0625rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 1.875rem;
+  --fs-3xl: 2.25rem;
+
+  /* Spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+
+  --sidebar-width: 248px;
+  --topbar-height: 60px;
+  --bottomnav-height: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a;
+    --bg-elevated: #1c1f24;
+    --bg-sunken: #101216;
+    --bg-hover: #262a30;
+    --surface-border: #2c3037;
+    --surface-border-strong: #383d45;
+
+    --text-primary: #f1f1ee;
+    --text-secondary: #b6b8bd;
+    --text-tertiary: #83868d;
+    --text-inverse: #1a1917;
+
+    --brand: #7ea3dc;
+    --brand-strong: #9cb8e4;
+    --brand-soft: #1f2a3d;
+    --brand-soft-border: #2b3a54;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #14161a;
+  --bg-elevated: #1c1f24;
+  --bg-sunken: #101216;
+  --bg-hover: #262a30;
+  --surface-border: #2c3037;
+  --surface-border-strong: #383d45;
+
+  --text-primary: #f1f1ee;
+  --text-secondary: #b6b8bd;
+  --text-tertiary: #83868d;
+  --text-inverse: #1a1917;
+
+  --brand: #7ea3dc;
+  --brand-strong: #9cb8e4;
+  --brand-soft: #1f2a3d;
+  --brand-soft-border: #2b3a54;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+}

@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Local SQLite database (contains real user data — never commit it)
+data/*.db
+data/*.db-*
+
+# Environment variables / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+*.tmp

@@ -1,0 +1,24 @@
+{
+  "name": "lifeadmin",
+  "version": "1.0.0",
+  "description": "LifeAdmin - a personal and family life-management platform",
+  "private": true,
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node src/db/seed-demo.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
