@@ -1,0 +1,65 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+h1, h2, h3, h4, p, figure { margin: 0; }
+h1, h2, h3, h4 { font-weight: 650; letter-spacing: -0.01em; }
+a { color: inherit; text-decoration: none; }
+button, input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; }
+/* Every <button> in this app is meant to be deliberately styled by a
+   class (.btn, .icon-btn, .nav-link, .tab, ...) — any bare <button> with
+   no such class (e.g. auth.js's "Forgot your password?"/"Create an
+   account" text-links) was falling back to the browser's native button
+   chrome (an inset border + grey gradient), which is where the "looks
+   basic/inconsistent" complaint traces to. Reset appearance to nothing
+   here, once, globally — every styled variant already sets its own
+   background/border/padding explicitly and is completely unaffected. */
+button {
+  cursor: pointer; appearance: none; -webkit-appearance: none;
+  background: none; border: none; padding: 0; margin: 0; text-align: inherit;
+}
+ul, ol { margin: 0; padding: 0; list-style: none; }
+img, svg { display: block; max-width: 100%; }
+
+::selection { background: var(--brand-200); }
+
+/* Baseline focus indicator for every element. Buttons/inputs that declare
+   their own box-shadow (e.g. .btn-primary's resting shadow) can otherwise
+   silently win the cascade over this rule despite equal specificity, since
+   they're declared later in source order — see components.css's
+   `.btn:focus-visible` for the higher-specificity override that guarantees
+   primary buttons keep a visible focus ring. No border-radius override
+   here (removed): forcing --radius-sm on focus regardless of the
+   element's own radius caused a visible shape snap on every focus event
+   for anything using --radius-md/--radius-lg (i.e. most buttons/cards),
+   which served no purpose. */
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Scrollbars — subtle, not intrusive */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-border-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--surface-border-strong); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+.icon { width: 18px; height: 18px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-sm { width: 15px; height: 15px; }
+.icon-lg { width: 22px; height: 22px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

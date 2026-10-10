@@ -1,0 +1,53 @@
+[OK] AUTHZ-1: owner-scoped resources (tasks, bills, goals, decisions, ecolife) refuse other users (403/404) and unauthenticated (401) on 16 probes
+[OK] AUTHZ-2: other user's list endpoints return no foreign data
+[OK] AUTHZ-3: family/chat/shopping endpoints return 403 to a non-member on all 11 probes
+[OK] AUTHZ-4: plain member is refused add/role/remove/transfer (403)
+[FINDING] SEC-BILL-FAMILY-1: non-member X created a bill attached to family 1 (HTTP 201)
+[FINDING] SEC-BILL-FAMILY-2: attacker-controlled text in victim family activity feed: true; in victim notifications: true
+[FINDING] SEC-BILL-FAMILY-3: bill with non-existent familyId -> HTTP 500
+[FINDING] SEC-CHAT-REACT-1: member of family 2 added a reaction to message 1 of family 1 (HTTP 201); victim sees 1 reaction(s) with arbitrary emoji string of length 50
+[FINDING] SEC-CHAT-REACT-2: reaction on non-existent message -> HTTP 500
+[FINDING] SEC-INVITE-1: removed member rejoined with the unchanged invite code (HTTP 201); no way to rotate/revoke the code (no route)
+[FINDING] SEC-INVITE-2: invite-code rotation route: HTTP 404 (404 = does not exist)
+[FINDING] SEC-INVITE-3: 120 wrong invite codes in a row were all answered 400 — no rate limit on /api/family/join
+[FINDING] SEC-INVITE-4: demo-seeded family invite code is "DEMO3043" (DEMO + 4 digits = 9,000 possible values) and /join is unlimited
+[FINDING] SEC-INVITE-5: outsider joined a demo-seeded family by guessing DEMO3043 after 31 tries (searched a ±30 window; full space is 9,000)
+[FINDING] SEC-INVITE-6: ...and could then read 4 chat messages of that family
+[FINDING] INTEGRITY-OWNER-1: owner demoted themself via PATCH (HTTP 200): owner rows=0 but families.owner_id still 6 — the family now has no member able to manage it, and Phase 8.3's transfer is no longer possible
+[FINDING] INTEGRITY-OWNER-2: after self-demotion, transfer-ownership -> HTTP 403
+[INFO] INTEGRITY-OWNER-3: account deletion for that "demoted" owner -> HTTP 400 (You own a family, so this account can't be deleted yet. Tran)
+[FINDING] PRIV-TASK-1: private task title visible to other member in the family activity feed: "Test created "SECRET private thing""
+[FINDING] PRIV-TASK-2: private task title visible to other member in Timeline
+[OK] PRIV-TASK-3: private task itself is hidden (404)
+[OK] PRIV-TASK-4: no notification leak
+[FINDING] PRIV-TASK-5: search returns private-task comment text to a third family member: ["COMMENT-ON-PRIVATE-TASK"]
+[FINDING] AUTHZ-ASSIGNEE-1: assignee (not owner) PATCH -> 200; task now visibility=family, title="assignee renamed it", status="weird-status" (any field is editable by anyone who can see the task; status/priority/visibility values are not validated on PATCH)
+[FINDING] LIFECYCLE-LEAVE-1: after leaving the family, former member can still read the task assigned to them in that family -> HTTP 200
+[OK] LIFECYCLE-LEAVE-2: after leaving, family activity -> HTTP 403
+[FINDING] VALID-BILL-1: bill with unsupported recurrence "daily" accepted on create, then Pay -> HTTP 500
+[FINDING] VALID-BILL-2: bill with dueDate "not-a-date" -> HTTP 201
+[FINDING] VALID-BILL-3: PATCH bill amount -50 -> HTTP 200
+[FINDING] VALID-TASK-1: PATCH task title as object -> HTTP 500 (generic 500; message: Something went wrong on our end. Please try again.)
+[FINDING] VALID-TASK-2: PATCH task title "" -> HTTP 200
+[FINDING] VALID-LEN-1: 900,000-character task title -> HTTP 201 (no length limits anywhere; only the 1 MB body cap)
+[FINDING] VALID-GOAL-1: goal after its only (completed) milestone is deleted: progress=100, status=completed, milestones=0
+[FINDING] ERR-JSON-1: malformed JSON body -> HTTP 400, error text: "Unexpected end of JSON input"
+[FINDING] ENUM-SIGNUP-1: signup with an existing email -> "An account with this email or phone already exists." (reveals that the account exists; login/forgot-password are enumeration-safe)
+[FINDING] RATE-SIGNUP-1: 25/25 rapid signups from one IP succeeded — /api/auth/signup has no rate limit (each costs a bcrypt hash)
+[FINDING] PRIV-PHONE-1: any user can add an arbitrary phone number to their own family: the victim is added WITHOUT consent (no accept step) and their full name "Test User11" is returned — a phone->name lookup
+[FINDING] PREFS-1: chat notifications still delivered after the user disabled them (1 received) — preferences are stored but never read
+[FINDING] PREFS-2: with "Use AI features" turned OFF the AI chat endpoint still runs (HTTP 200, body {"ok":false,"error":"AI features require an ANTHROPIC_API_KEY. Add one to your .env file t); no server-side check of ai_enabled exists (grep: only settings.js/auth.js reference it)
+[FINDING] OTP-1: with NODE_ENV=production the verification endpoint still returns the code in the response ("demoCode": 239377) — "verified" badges prove nothing
+[FINDING] OTP-2: 30/30 OTP requests accepted (no limit on issuing codes; also unbounded rows in otp_codes)
+[FINDING] SESSION-EXP-1: session whose expires_at was 1h ago (same UTC day) is still accepted: true (ISO 'T' vs SQLite ' ' string comparison; same defect class as the OTP bug fixed in 8.2). Effect: sessions live until UTC midnight after expiry (<= 24h over the 30-day TTL). No expired-session cleanup job exists.
+[INFO] LIFECYCLE-DEL-1: member deletes account (HTTP 200). family-scoped tasks 2->1; chat messages 1->0; comments on others' tasks 1->0; shopping items 1->1 (kept, author cleared); activity rows with actor 5->2 (+3 now actor-less)
+[FINDING] LIFECYCLE-DEL-2: a task the deleted member shared with the family ("visibility: family") was deleted for everyone
+[INFO] LIFECYCLE-DEL-3: bill with family_id owned by the deleted user remaining rows: 0
+[OK] INTEGRITY-FK-1: PRAGMA foreign_key_check reports no violations after all probes
+[FINDING] DEMO-1: "Load demo data" by one member posted 4 fake chat messages into the REAL family visible to the other member
+[FINDING] DEMO-2: seeding 3x -> 24 demo tasks (not idempotent)
+[FINDING] DEMO-3: "Clear demo data" removes only tasks+bills; remaining after clear: goals=6, eco logs=12, decisions=3, family chat messages=12, shopping items=9
+[FINDING] HEADERS-1: response security headers: content-security-policy=(absent); x-frame-options=(absent); x-content-type-options=(absent); strict-transport-security=(absent); referrer-policy=(absent); x-powered-by=Express
+[INFO] OPS-1: /health -> 404, /api/health -> 404 (no health endpoint)
+[INFO] COOKIE-1: session cookie attributes (NODE_ENV=test): la_session=0948f7ed210eccc52b89edb9f5064c2c26d45568b779597d27a5d8eadfb1a09d; Path=/; Expires=Wed, 28 Oct 2026 16:03:49 GMT; HttpOnly; SameSite=Lax
+[INFO] COOKIE-2: session cookie attributes (NODE_ENV=production): la_session=4034568e744412b12ad672efaba8993270a4e2ca0d0b95e7b86200d0d55c9f3d; Path=/; Expires=Wed, 28 Oct 2026 16:03:49 GMT; HttpOnly; Secure; SameSite=Lax

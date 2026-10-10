@@ -1,0 +1,19 @@
+{
+  "name": "lifeadmin-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "React + Vite frontend foundation for LifeAdmin (Phase 1: Dashboard only). Builds a small ES module bundle that the existing vanilla-JS shell (public/js/app.js) loads for the #/dashboard route only — every other page is still served by the original shell. See PHASE_1_REACT_FOUNDATION_REPORT.md.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

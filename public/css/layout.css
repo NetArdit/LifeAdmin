@@ -1,0 +1,243 @@
+#app { min-height: 100%; }
+
+/* ---------- Auth screen ---------- */
+.auth-shell {
+  min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr;
+}
+.auth-visual {
+  background: linear-gradient(155deg, var(--brand-800) 0%, var(--brand-900) 55%, #0e1517 100%);
+  background-image:
+    radial-gradient(circle at 15% 12%, rgba(255,255,255,0.07), transparent 45%),
+    linear-gradient(155deg, var(--brand-800) 0%, var(--brand-900) 55%, #0e1517 100%);
+  color: #fff; display: flex; flex-direction: column; justify-content: space-between;
+  padding: var(--sp-12); position: relative; overflow: hidden;
+}
+.auth-visual::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
+  background-image: repeating-linear-gradient(115deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 64px);
+}
+.auth-visual > * { position: relative; }
+.auth-visual h1 { font-family: var(--font-serif); font-weight: 460; font-size: 2.5rem; line-height: 1.2; max-width: 420px; }
+.auth-visual p { color: rgba(255,255,255,0.7); max-width: 380px; margin-top: var(--sp-4); font-size: var(--fs-base); }
+.auth-brand { display: flex; align-items: center; gap: var(--sp-2); font-family: var(--font-serif); font-weight: 500; font-size: 1.3rem; }
+.auth-form-side { display: flex; align-items: center; justify-content: center; padding: var(--sp-6); background: var(--bg); }
+.auth-card { width: 100%; max-width: 400px; }
+.auth-switch { text-align: center; margin-top: var(--sp-5); font-size: var(--fs-sm); color: var(--text-secondary); }
+.auth-switch button { color: var(--brand); font-weight: 600; border-radius: 4px; transition: color var(--transition-fast); }
+.auth-switch button:hover { color: var(--brand-strong); text-decoration: underline; text-underline-offset: 3px; }
+
+@media (max-width: 860px) {
+  .auth-shell { grid-template-columns: 1fr; }
+  .auth-visual { display: none; }
+}
+
+/* ---------- App shell (C3 Phase 1: header + module rail) ----------
+   Replaces the previous collapsed vertical sidebar entirely — not a
+   recolor of it. The C3 Shell Final Validation Gate rendered and
+   measured this exact composition (real Playwright scrollWidth/
+   getBoundingClientRect checks, all 7 required widths, both themes)
+   before this was implemented: a sticky two-row top (.shell-header +
+   .module-rail, wrapped in one sticky .shell-top so the rail's sticky
+   offset never has to be hand-computed against a variable header
+   height), then plain content flow — no fixed sidebar, so no
+   margin-left offset hack on the content column either. */
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+.shell-top { position: sticky; top: 0; z-index: 60; background: var(--bg); border-bottom: 1px solid var(--surface-border); }
+
+.shell-header { display: flex; align-items: center; gap: var(--sp-3); padding: 10px var(--sp-6); }
+.shell-header .brand { display: flex; align-items: center; gap: var(--sp-2); font-family: var(--font-serif); font-weight: 500; font-size: 1.1rem; letter-spacing: -0.01em; flex-shrink: 0; }
+.shell-header .brand-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--brand); color: var(--text-inverse); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; flex-shrink: 0; }
+.shell-header .header-spacer { flex: 1; }
+
+/* Today / This Week / Ledger — a real segmented tablist, not a styled
+   stand-in for one. */
+.view-switch { display: flex; gap: 2px; background: var(--bg-sunken); border-radius: var(--radius-full); padding: 3px; flex-shrink: 0; }
+.view-switch button {
+  font: inherit; font-size: var(--fs-sm); font-weight: 650; color: var(--text-tertiary);
+  background: none; border: none; padding: 8px 16px; border-radius: var(--radius-full); min-height: 44px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.view-switch button.active { background: var(--brand); color: var(--text-on-brand); }
+.view-switch button:hover:not(.active) { color: var(--text-primary); }
+
+.header-icons { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Shared primitive, unchanged from before this phase — reused as-is by
+   modal.js's close button and several modules' inline row actions (well
+   outside this phase's scope, so its own 36x36 footprint stays exactly
+   what it was). */
+.icon-btn {
+  position: relative; width: 36px; height: 36px; border-radius: var(--radius-full);
+  display: flex; align-items: center; justify-content: center; color: var(--text-secondary);
+  background: var(--bg-sunken);
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); transform: translateY(-1px); }
+.icon-btn:active { transform: scale(0.92); transition-duration: 80ms; }
+.icon-btn .chip-count { position: absolute; top: 2px; right: 2px; }
+
+/* Only the shell header's own instances grow to the 44px touch-target
+   guideline (Search/Notifications/Assistant — the app's highest-frequency
+   controls) — scoped so nothing elsewhere in the app is affected by this
+   phase's work. */
+.shell-header .icon-btn { width: 44px; height: 44px; }
+.shell-header .icon-btn .chip-count { top: 0; right: 0; }
+
+.account-chip {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; min-height: 44px; border-radius: var(--radius-full);
+  background: var(--bg-sunken); flex-shrink: 0; max-width: 220px; position: relative;
+  transition: background var(--transition-fast);
+}
+.account-chip:hover { background: var(--bg-hover); }
+.account-chip .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-strong); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.account-chip .name { font-size: var(--fs-sm); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-chip .chip-count { position: absolute; top: -2px; right: -2px; }
+
+/* Module rail — Family / Bills / Goals / Decisions / EcoLife. Deliberately
+   ALWAYS icon+label at every required width, never icon-only: the C3 Shell
+   Final Validation Gate found icon-only compression at narrow widths
+   created a real first-glance comprehension failure on 2 of 5 items
+   (Decisions/EcoLife) with no way for a first-time user to resolve it, and
+   named it as sharing the same failure mode as the old collapsed sidebar
+   this redesign replaces. Horizontal scroll on the narrowest phones (an
+   existing, already-used pattern — see .filter-row elsewhere) is the
+   chosen tradeoff: a swipe, not a guess. */
+.module-rail { display: flex; gap: 4px; padding: 6px var(--sp-6) 10px; overflow-x: auto; }
+.rail-item {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--radius-full);
+  font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); flex-shrink: 0;
+  min-height: 44px; position: relative; white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.rail-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rail-item.active { background: var(--brand-soft); color: var(--brand-strong); font-weight: 650; }
+.rail-badge { width: 7px; height: 7px; border-radius: 50%; background: var(--danger-500); flex-shrink: 0; }
+
+/* Account menu — a real role="menu" dropdown, positioned in JS against its
+   trigger's actual bounding rect (app.js's positionFloatPanel) and clamped
+   on-screen, not a fixed guess. Holds Settings + Log out at every width
+   (utility tier, no header icon ever duplicates them) plus Search /
+   Notifications / Ask the assistant only when .header-icons is hidden —
+   see .compact-only below. */
+.account-menu {
+  position: fixed; width: 240px; background: var(--bg-elevated); border: 1px solid var(--surface-border-strong);
+  border-radius: var(--radius-lg); padding: 8px; z-index: 400; box-shadow: var(--shadow-lg); animation: modal-in 150ms var(--ease-smooth);
+}
+.account-menu .menu-identity { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-bottom: 1px solid var(--surface-border); margin-bottom: 6px; }
+.account-menu .menu-identity .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-strong); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.account-menu .menu-identity .name { font-size: var(--fs-sm); font-weight: 650; overflow-wrap: break-word; }
+.account-menu .menu-identity .email { font-size: 11px; color: var(--text-tertiary); overflow-wrap: break-word; }
+.account-menu .menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  color: var(--text-primary); font-size: var(--fs-sm); padding: 11px 10px; border-radius: var(--radius-md); min-height: 44px;
+}
+.account-menu .menu-item:hover { background: var(--bg-hover); }
+.account-menu .menu-item .chip-count { margin-left: auto; position: static; }
+.account-menu .compact-only { display: none; }
+
+/* Quick-add FAB — mobile only (>=900px, every page already has its own
+   page-level "+ New …" action, so a second, redundant entry point would be
+   dead weight, not a feature). Real behavior: opens the same task-creation
+   modal Tasks' own "New task" button uses (see app.js's openQuickAddTask),
+   not a decorative button. safe-area-inset-aware per the validation gate's
+   own flagged (and here, applied) fix for notched-device bottom chrome. */
+.fab {
+  position: fixed; bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); right: calc(var(--sp-5) + env(safe-area-inset-right, 0px));
+  width: 56px; height: 56px; border-radius: 50%; background: var(--brand); color: var(--text-on-brand);
+  display: flex; align-items: center; justify-content: center; z-index: 70; box-shadow: var(--shadow-lg);
+  transition: transform var(--transition-fast);
+}
+.fab .icon { width: 24px; height: 24px; stroke-width: 2.2; }
+.fab:hover { transform: translateY(-2px); }
+.fab:active { transform: scale(0.94); transition-duration: 80ms; }
+@media (min-width: 900px) { .fab { display: none; } }
+
+/* Header icon row (Search/Notifications/Assistant) collapses into the
+   account menu below 860px — reusing the exact breakpoint .auth-shell
+   already established elsewhere in this file, rather than inventing a new
+   one. Nothing is lost, only relocated: see .compact-only above. */
+@media (max-width: 859px) {
+  .header-icons { display: none; }
+  .account-menu .compact-only { display: flex; }
+}
+
+.page { padding: var(--sp-6); max-width: 1200px; width: 100%; margin: 0 auto; animation: page-in 220ms ease; }
+/* Reserves room for the FAB (same <900px threshold as .fab itself) so it
+   never sits on top of a page's last row of content. */
+@media (max-width: 899px) { .page { padding-bottom: calc(var(--sp-6) + 72px); } }
+@keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-6); flex-wrap: wrap; }
+.page-title { font-family: var(--font-serif); font-size: var(--fs-2xl); font-weight: 560; letter-spacing: -0.01em; }
+.page-subtitle { color: var(--text-secondary); margin-top: 4px; font-size: var(--fs-sm); }
+.page-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ---------- Panels (notifications dropdown) ----------
+   Position (top/left) is set in JS against the trigger's real
+   getBoundingClientRect() and clamped on-screen (app.js's
+   positionFloatPanel) — not fixed here, since the trigger itself moves
+   between the header's icon row and the account menu depending on
+   viewport width (see .header-icons/.compact-only above). */
+.float-panel {
+  position: fixed; width: min(380px, calc(100vw - 24px)); max-height: 70vh;
+  overflow-y: auto; background: var(--bg-elevated); border: 1px solid var(--surface-border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: 400; animation: modal-in 150ms ease;
+}
+.float-panel-header { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4); border-bottom: 1px solid var(--surface-border); }
+
+.command-overlay { position: fixed; inset: 0; z-index: 960; }
+/* Search's own backdrop (#cmd-backdrop, a .modal-backdrop instance — see
+   app.js's openCommandPalette) is overridden here to fully transparent:
+   the user explicitly asked for the app behind search to stay clean and
+   normal-looking, not dimmed at all. This is scoped to the command
+   palette's own backdrop by id, not a change to .modal-backdrop itself —
+   real modals (task/bill editors, etc.) keep their dim, which wasn't
+   part of this complaint and still benefits from it. */
+#cmd-backdrop { background: transparent; }
+.command-panel {
+  width: min(560px, 92vw); margin: 10vh auto 0; background: var(--bg-elevated);
+  border: 1px solid var(--surface-border-strong); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden; animation: modal-in 150ms var(--ease-smooth);
+}
+.command-input-wrap { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-5); border-bottom: 1px solid var(--surface-border); }
+.command-input-wrap .icon { color: var(--text-tertiary); flex-shrink: 0; }
+.command-input { flex: 1; width: 100%; height: 54px; border: none; padding: 0; font-size: var(--fs-md); background: transparent; }
+.command-input:focus { box-shadow: none; }
+.command-results { max-height: 50vh; overflow-y: auto; padding: var(--sp-2); }
+.command-results .empty-state { color: var(--text-secondary); }
+.command-results .empty-state .icon-lg { margin-bottom: var(--sp-2); }
+.command-result { display: flex; align-items: center; gap: var(--sp-3); padding: 10px var(--sp-3); border-radius: var(--radius-md); font-size: var(--fs-sm); transition: background var(--transition-fast), transform var(--transition-fast); }
+.command-result:hover { background: var(--bg-hover); transform: translateX(2px); }
+.command-result .icon { color: var(--text-tertiary); }
+.command-hint {
+  display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-2) var(--sp-5);
+  border-top: 1px solid var(--surface-border); background: var(--bg-sunken);
+  font-size: 11px; color: var(--text-tertiary);
+}
+.command-hint span { display: flex; align-items: center; gap: 5px; }
+.command-hint kbd { font-family: var(--font-sans); font-size: 10px; font-weight: 650; background: var(--bg-hover); border: 1px solid var(--surface-border-strong); border-radius: 4px; padding: 1px 5px; color: var(--text-secondary); }
+
+@media (max-width: 640px) {
+  /* Individual sides, not the `padding` shorthand — a shorthand here would
+     reset the bottom inset the <900px rule above reserves for the FAB,
+     and this query is nested inside that one's range. */
+  .page { padding-top: var(--sp-4); padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  .page-header { flex-direction: column; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .shell-header { padding: 8px var(--sp-4); }
+  .module-rail { padding: 6px var(--sp-4) 10px; }
+}
+
+/* Narrowest phones: the header itself needs the same three-part fix the
+   validation gate rendered, measured (confirmed zero scrollWidth overflow
+   at 320-430px) and fixed before this was implemented — wordmark to
+   icon-mark only, account chip to avatar-only, switch padding tightened.
+   Placed after the 640px block above (not before) so it wins the cascade
+   at these narrower widths, where both blocks otherwise match. */
+@media (max-width: 479px) {
+  .shell-header { padding: 8px var(--sp-3); gap: 8px; }
+  .shell-header .brand-text { display: none; }
+  .account-chip .name { display: none; }
+  .account-chip { padding: 0; width: 44px; height: 44px; justify-content: center; }
+  .view-switch button { padding: 8px 10px; font-size: 12.5px; }
+}

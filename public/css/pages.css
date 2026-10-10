@@ -1,0 +1,283 @@
+/* ---------- Dashboard ---------- */
+/* Redesign Batch 2: dropped the left-border-stripe accent (the same
+   admin-panel edge-bar convention removed from .nav-link/BucketCard) for
+   a soft brand-tinted wash — the banner now reads as its own tinted
+   surface rather than a white card with a colored line drawn on it. */
+.today-banner {
+  background: linear-gradient(135deg, var(--brand-soft) 0%, var(--bg-elevated) 65%);
+  border: 1px solid var(--brand-soft-border);
+  border-radius: var(--radius-lg); padding: var(--sp-6); margin-bottom: var(--sp-6);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap;
+}
+.today-banner h2 { font-family: var(--font-serif); font-weight: 500; font-size: var(--fs-xl); color: var(--text-primary); }
+.today-banner p { color: var(--text-tertiary); margin-top: 4px; font-size: var(--fs-sm); }
+.today-banner .today-count {
+  font-family: var(--font-serif); font-size: var(--fs-2xl); font-weight: 500; color: var(--brand-strong); line-height: 1;
+  font-variant-numeric: tabular-nums;
+  width: 64px; height: 64px; border-radius: 50%; background: var(--bg-elevated); box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+
+/* Grid items default to min-width:auto, so a track was sizing to its
+   widest child's intrinsic content width (e.g. a bill row's non-shrinking
+   icon+amount+button) instead of the available space — pushing the whole
+   page wider than the viewport at narrow widths (Phase 1.5, reconfirmed
+   Phase 4). min-width:0 is the standard fix: it lets the track size to
+   the actual available width, and each child's own overflow handling
+   (e.g. .row-title's text-overflow:ellipsis) takes over from there — no
+   content is hidden, nothing needs overflow-x:hidden. */
+.dash-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--sp-5); align-items: start; }
+.dash-grid > * { min-width: 0; }
+.stat-tile { display: flex; flex-direction: column; gap: 2px; }
+.stat-tile .stat-value { font-family: var(--font-serif); font-size: var(--fs-2xl); font-weight: 500; font-variant-numeric: tabular-nums; }
+.stat-tile .stat-label { font-size: var(--fs-xs); color: var(--text-tertiary); }
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-4); margin-bottom: var(--sp-5); }
+
+.bucket-header { display: flex; align-items: center; gap: 8px; }
+.bucket-header .badge-dot-lg { width: 8px; height: 8px; border-radius: 50%; }
+/* Visual Redesign Batch 6: the compact (non-dominant) bucket header is a
+   real <button> (disclosure toggle) wearing the same .bucket-header flex
+   layout as the dominant bucket's plain heading — base.css already resets
+   a button's font/color/cursor globally, so only chrome/sizing specific
+   to standing in for a full-width row header is added here. */
+.bucket-toggle { width: 100%; margin: 0; padding: 0; border: 0; background: none; text-align: left; }
+.bucket-chevron { margin-left: 2px; transition: transform var(--transition-fast); color: var(--text-tertiary); }
+.bucket-toggle[aria-expanded="true"] .bucket-chevron { transform: rotate(180deg); }
+
+@media (max-width: 900px) {
+  .dash-grid { grid-template-columns: 1fr; }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- Tasks ---------- */
+.filter-bar { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-5); align-items: center; }
+.task-priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ---------- Family / Chat ---------- */
+.family-tabs-wrap { margin-bottom: var(--sp-5); }
+.member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-3); }
+.member-card { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); }
+.member-role { text-transform: capitalize; }
+
+.chat-window { display: flex; flex-direction: column; height: calc(100vh - var(--shell-chrome-height) - 220px); min-height: 360px; }
+.chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2); }
+.chat-bubble-row { display: flex; gap: var(--sp-2); align-items: flex-end; max-width: 80%; }
+.chat-bubble-row.self { align-self: flex-end; flex-direction: row-reverse; }
+.chat-bubble { background: var(--bg-sunken); border-radius: var(--radius-lg); padding: 9px 13px; font-size: var(--fs-sm); }
+.chat-bubble-row.self .chat-bubble { background: var(--brand); color: var(--text-on-brand); }
+.chat-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 3px; }
+.chat-bubble-row.self .chat-meta { text-align: right; }
+.chat-input-row { display: flex; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--surface-border); margin-top: var(--sp-2); }
+.chat-day-sep { text-align: center; font-size: 11px; color: var(--text-tertiary); margin: var(--sp-2) 0; }
+
+.shopping-item { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 4px; }
+.shopping-item.done .shopping-name { text-decoration: line-through; color: var(--text-tertiary); }
+
+/* ---------- BillSense ---------- */
+/* Visual Redesign Batch 3: row-icon tint reads from the ambient
+   module-accent context (--_accent-muted/--_accent-strong) rather than
+   the generic brand-soft/brand-strong pair — .bill-cat-icon is rendered
+   inside BillSense's .list-region, which now wears
+   .module-accent--money (BillSense.jsx), so this resolves to the Money
+   accent automatically without hardcoding which accent by name here.
+   38x38px matches the governance rule's "sized to a single icon's own
+   backing shape" requirement for -muted (components.css). */
+.bill-cat-icon { width: 38px; height: 38px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; background: var(--_accent-muted); color: var(--_accent-strong); flex-shrink: 0; }
+.bill-amount { font-weight: 700; font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.category-bar-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.category-bar-row .cat-label { width: 100px; font-size: var(--fs-xs); color: var(--text-secondary); flex-shrink: 0; text-transform: capitalize; }
+.category-bar-row .cat-amount { width: 70px; text-align: right; font-size: var(--fs-xs); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.category-bar-track { flex: 1; height: 10px; background: var(--bg-sunken); border-radius: var(--radius-full); overflow: hidden; }
+/* This rule lives outside the .list-region subtree (the "By category"
+   card is a sibling, not a descendant, of the accented list-region — see
+   BillSense.jsx), so it references the Money token directly by name
+   rather than the ambient --_accent-* variables above, which only
+   resolve inside an element that itself wears .module-accent--money. */
+.category-bar-fill { height: 100%; background: var(--accent-money-border); border-radius: var(--radius-full); }
+
+/* ---------- DecisionFlow ---------- */
+.criterion-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; }
+.criterion-row .crit-name { flex: 1; font-size: var(--fs-sm); font-weight: 600; }
+.weight-dots { display: flex; gap: 4px; }
+/* A real <button> (not a div) so weight can be set by keyboard, not just
+   click — built this way from the start rather than reproducing the
+   vanilla div's lack of focusability. background/padding reset since this
+   is a <button>; the focus ring itself is already handled by base.css's
+   universal *:focus-visible rule (no competing box-shadow declared here). */
+.weight-dot { width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 1.5px solid var(--surface-border-strong); background: transparent; cursor: pointer; }
+.weight-dot.filled { background: var(--brand); border-color: var(--brand); }
+
+.option-card { border: 1px solid var(--surface-border); border-radius: var(--radius-md); padding: var(--sp-4); position: relative; }
+.option-card.recommended { border-color: var(--accent-500); box-shadow: 0 0 0 1px var(--accent-500); }
+.option-rank-badge { position: absolute; top: -10px; right: var(--sp-4); background: var(--accent-500); color: #fff; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: var(--radius-full); }
+.option-score-bar { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); }
+.pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); font-size: var(--fs-xs); }
+.pros-cons .pc-title { font-weight: 700; margin-bottom: 4px; }
+.pros-cons ul { display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); }
+
+/* ---------- EcoLife (Visual Redesign Batch 9) ----------
+   Category tiles are a genuine bounded SET (exactly six fixed
+   categories, always all six rendered even at zero logs — never a
+   growing continuum), so they stay .grid-3 of plain .eco-cat-card
+   tiles; the log list below them is the continuum and moved to
+   .list-region.module-accent--nature, the same hero-tiles-then-list
+   composition BillSense already established (Batch 3). Nature was
+   fully unused anywhere in the app before this batch (verified) — the
+   first real consumer, not a color invented for this page. These tiles
+   sit outside the .list-region subtree (siblings, not descendants — see
+   EcoLife.jsx), so — like BillSense's .category-bar-fill — this
+   references the Nature token directly by name rather than the ambient
+   --_accent-* variables, which only resolve inside a .module-accent--*
+   element. */
+.eco-cat-card { text-align: center; padding: var(--sp-5) var(--sp-3); }
+.eco-cat-icon { width: 44px; height: 44px; border-radius: 50%; background: var(--accent-nature-muted); color: var(--accent-nature-border); display: flex; align-items: center; justify-content: center; margin: 0 auto var(--sp-2); }
+
+/* ---------- Goals (Visual Redesign Batch 7C) ----------
+   Index + bounded inline-expand, replacing the old equal-weight card
+   grid (see GOALS_BATCH7_RESEARCH.md). Each goal is a .row-item that is
+   itself a real disclosure <button> — the same shape as Dashboard's
+   .bucket-toggle (BucketCard.jsx): the whole row's only job when
+   collapsed is "open this goal," so nothing needs to be nested inside it.
+   Opening a goal reveals a bounded panel below it: the next incomplete
+   milestone plus at most one more upcoming one are always visible;
+   everything past that — further incomplete milestones and already-done
+   ones alike — sits behind an explicit "Show all", never an unbounded
+   inline list (Batch 7B prototype evidence: past ~5 milestones an
+   uncapped list stopped reading as a goal summary and read as a nested
+   task manager instead). */
+.goal-row-toggle { width: 100%; margin: 0; border: 0; background: none; text-align: left; cursor: pointer; min-height: 44px; }
+.goal-row-category { text-transform: capitalize; }
+.goal-row-status.is-completed { color: var(--accent-600); font-weight: 600; }
+.goal-row-status.is-abandoned { color: var(--text-tertiary); font-weight: 600; }
+.goal-target.is-overdue { color: var(--danger-600); font-weight: 600; }
+.goal-target.is-approaching { color: var(--warning-600); font-weight: 600; }
+.goal-row-progress { width: 72px; flex-shrink: 0; }
+.goal-row-pct { width: 34px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.goal-row-chevron { transition: transform var(--transition-fast); color: var(--text-tertiary); }
+.goal-row-chevron.is-open { transform: rotate(180deg); }
+/* Audit pass: the expanded panel used to sit as loose, unboxed text
+   directly on the page — including a progress bar/percentage that
+   visually repeats the one already shown in the collapsed summary row
+   right above it, which read as an accidental duplicate rather than a
+   detail view. Framing it as its own lifted panel (elevated surface,
+   its own edge) makes the repeated summary line read as intentional —
+   "here's the full detail" — instead of stray text, and gives the
+   already-tinted .goal-detail-next callout inside it a clear surface to
+   sit on top of (bg-elevated here, one step lighter than that inner
+   bg-sunken callout, instead of both being invisible against the plain
+   page background). */
+.goal-detail {
+  padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3);
+  background: var(--bg-elevated); border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+}
+.goal-detail-next { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-sunken); border-radius: var(--radius-md); }
+.goal-detail-next .milestone-title { font-weight: 600; }
+.goal-show-all { min-height: 44px; align-self: flex-start; }
+.milestone-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.milestone-row.done .milestone-title { text-decoration: line-through; color: var(--text-tertiary); }
+
+/* ---------- Timeline (Visual Redesign Batch 4) ----------
+   The chronicle composition: date-group headings carry real typographic
+   weight (Fraunces, --type-date-group — the role Batch 1 introduced
+   specifically for this) instead of a small uppercase label, since
+   chronology is this page's entire reason to exist, not one signal among
+   several. No vertical connector line was added: with a clear date
+   heading and a per-row time already present, a line would be decorative
+   rather than chronologically useful (see the batch report's visual
+   self-critique). */
+.timeline-day { margin-bottom: var(--sp-6); }
+.timeline-day-label { font: var(--type-date-group); color: var(--text-primary); margin-bottom: var(--sp-3); }
+.timeline-item { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-2); margin: 0 calc(var(--sp-2) * -1); border-radius: var(--radius-sm); position: relative; }
+/* Only a real <a> (an event with somewhere to go) gets the hover
+   affordance — a plain, non-interactive <div> row (see TimelineItem in
+   Timeline.jsx) correctly looks inert, not clickable. */
+a.timeline-item:hover { background: var(--bg-hover); }
+/* Replaces the old plain, uniformly brand-colored dot with the source
+   event's own module icon (the exact icon that module already uses in
+   the sidebar/its own rows elsewhere) tinted with that module's accent —
+   falls back to --brand for Tasks' own (unaccented, per governance)
+   event types via the CSS custom-property fallback, so this needs no
+   per-accent override rules the way earlier batches' heading color did. */
+.timeline-icon { color: var(--_accent-strong, var(--brand)); flex-shrink: 0; margin-top: 1px; }
+.timeline-time { width: 46px; flex-shrink: 0; font-size: 11px; color: var(--text-tertiary); padding-top: 1px; }
+
+/* ---------- Assistant ---------- */
+/* Visual Redesign Batch 10: the previous height: calc(100vh - topbar -
+   140px) used a flat, guessed constant for "everything above the shell"
+   (page-header + subtitle + Weekly-review button + tabs) and never
+   subtracted the fixed bottom nav at all. Confirmed live (Playwright,
+   real running app): the composer's send button sat behind the bottom
+   nav at every width where the nav is shown, and a flat 140px was too
+   small once page-header wraps to multiple lines at narrow widths — a
+   second magic number would only have been a second guess. Replaced with
+   a real flex-fill: .assistant-page-flex (applied to the page root
+   alongside .page — see Assistant.jsx) is height-bound to the true
+   available viewport; .assistant-tabpanel-fill and .assistant-shell then
+   flex:1 to absorb whatever space page-header/tabs actually take, at any
+   breakpoint, without knowing their height in advance.
+
+   C3 Phase 1: --shell-chrome-height replaces --topbar-height/
+   --bottomnav-height here. There is no more fixed bottom nav to subtract
+   (the C3 shell has no bottom-nav row at all), and the C3 header is a
+   two-row sticky area (.shell-header + .module-rail) whose combined
+   height isn't a fixed constant the way the old single-row topbar was —
+   it's measured live off the real DOM (app.js, after every render and on
+   resize) and written to this one custom property, the same
+   "don't guess, measure" approach this comment already committed to. */
+.page.assistant-page-flex {
+  display: flex; flex-direction: column; height: calc(100vh - var(--shell-chrome-height));
+  padding-bottom: var(--sp-6);
+}
+@media (max-width: 640px) {
+  .page.assistant-page-flex { padding-bottom: var(--sp-4); }
+}
+.assistant-tabpanel-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.assistant-tabpanel-fill > .card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.assistant-shell { display: flex; flex-direction: column; flex: 1; min-height: 320px; }
+.assistant-messages { flex: 1; overflow-y: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-4); }
+.assistant-msg { max-width: 78%; }
+.assistant-msg.user { align-self: flex-end; }
+.assistant-msg .bubble { padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-lg); font-size: var(--fs-sm); white-space: pre-wrap; }
+.assistant-msg.user .bubble { background: var(--brand); color: var(--text-on-brand); border-bottom-right-radius: 4px; }
+.assistant-msg.assistant .bubble { background: var(--bg-sunken); border-bottom-left-radius: 4px; }
+.assistant-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-2); }
+.assistant-empty { text-align: center; padding: var(--sp-10) var(--sp-4); color: var(--text-secondary); }
+.assistant-prompt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); max-width: 480px; margin: var(--sp-5) auto 0; }
+.assistant-prompt-chip { text-align: left; padding: var(--sp-3); border: 1px solid var(--surface-border-strong); border-radius: var(--radius-md); font-size: var(--fs-xs); }
+.assistant-prompt-chip:hover { background: var(--bg-hover); }
+
+.plan-preview-day { margin-bottom: var(--sp-4); }
+.plan-block { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); padding: 4px 0; }
+.plan-block-time { font-variant-numeric: tabular-nums; color: var(--text-tertiary); width: 100px; flex-shrink: 0; }
+
+/* ---------- Settings ---------- */
+.settings-nav { display: flex; flex-direction: column; gap: 4px; }
+/* Each row gets its own small tinted icon chip (the same "icon in a soft
+   circle" idiom already used elsewhere — .account-chip .avatar, .brand-mark
+   — not a new, invented style) instead of a bare icon+label pair sitting
+   directly on the page background, which read as unfinished/too plain. */
+.settings-nav-item {
+  display: flex; align-items: center; gap: var(--sp-3); padding: 9px var(--sp-3) 9px 9px;
+  border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary);
+  cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+.settings-nav-item:hover { background: var(--bg-hover); color: var(--text-primary); transform: translateX(2px); }
+.settings-nav-item .settings-nav-icon {
+  width: 32px; height: 32px; border-radius: var(--radius-md); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-sunken); color: var(--text-tertiary);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.settings-nav-item.active { background: var(--brand-soft); color: var(--brand-strong); font-weight: 650; transform: none; }
+.settings-nav-item.active .settings-nav-icon { background: var(--brand); color: var(--text-on-brand); }
+.settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: var(--sp-6); align-items: start; }
+@media (max-width: 800px) { .settings-layout { grid-template-columns: 1fr; } }
+
+/* ---------- Onboarding / getting started ---------- */
+.onboard-card { background: var(--brand-soft); border: 1px solid var(--brand-soft-border); border-radius: var(--radius-lg); padding: var(--sp-5); display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-6); }
+.onboard-card .icon-lg { color: var(--brand-strong); }
+
+/* Phase 8.3: ownership transfer / leave family controls on the Members tab */
+.member-card { flex-wrap: wrap; }
+.member-actions { flex-basis: 100%; display: flex; }
+.member-lifecycle-note { margin-top: var(--sp-4); }

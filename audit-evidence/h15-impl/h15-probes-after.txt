@@ -1,0 +1,35 @@
+[INFO] P1-0: M removed by owner; M's families now: 0
+[OK] P1-1: removed member GET assigned family task -> 404; sees other members' comments: false
+[OK] P1-2: removed member task list shows: []
+[OK] P1-3: removed member dashboard payload mentions the family tasks: false
+[OK] P1-4: removed member search "FAMTASK": []
+[OK] P1-5: removed member can still comment on the assigned family task -> 404; family members notified: false; feed shows: true
+[OK] P1-6: removed member can edit/complete the family task -> 404; title now "FAMTASK-assigned-to-M"
+[INFO] P1-7: removed member editing a family-visible task THEY OWN -> 404; the family still sees that task: true (task keeps family_id and visibility=family; its owner is no longer a member)
+[INFO] P1-8: removed member's own notification list still contains 0 row(s): []
+[INFO] P2-1: plain member sees inviteCode in GET /api/family: false; GET /api/family/:id: false; in /api/settings/export: false
+[INFO] P2-2: add-member-by-phone (owner/admin only) for a plain member: 403; regenerate: 403; but the code lets ANY member invite anyone
+[INFO] P2-3: a plain member handing the code to a stranger works: stranger joins -> 201
+[OK] P3-1: assignee flips owner's private task to family -> 403; N (unrelated member) can now read it: false
+[OK] P3-2: ordinary member N sets the OWNER's family task to private -> 403; M (another member) still sees it: true; owner still sees it: true
+[OK] P3-3: assignee re-assigns the owner's PRIVATE task to another member -> 403; N can read it: false
+[INFO] P3-4: assignee/member delete of someone else's task -> 404 (owner-only already)
+[INFO] P3-5: simulated UI edit payload of a private task that has family_id (form preselects the family, so it sends visibility:"family") -> 200; visibility now: family
+[INFO] P3-6: PATCH accepts any visibility string: 400 -> stored "family"
+[OK] P4-1: N still receives snapshot text of a task N can no longer open (GET task -> 404): []; link=undefined
+[INFO] P4-2: notifications columns: id, user_id, type, title, body, link, read_at, created_at (no task_id / family_id reference; the task id lives only inside the link string)
+[INFO] P4-3: notification types in this run: comment:4, family:8, task:3
+[FINDING] P4-4: after removal M still sees family CHAT preview text in own notifications: true (received while a member: true)
+[OK] P5-1: 4 accounts x 10 failures, every request carrying a different X-Forwarded-For: last status per account [400,400,400,429] (429 on the 4th means the header is ignored and the per-IP budget still applied)
+[INFO] P6-1: legacy code space 2^32 = 4.29e+9; strong 2^60 = 1.15e+18; one IP is limited to 2880 guesses/day (per-IP budget); with F live legacy families the chance a single guess hits any = F/2^32
+[INFO] P6-2: F=100 families with legacy codes: P(one IP finds >=1 code in a day) = 0.0067%; IPs needed for ~50%/day = 10,337
+[INFO] P6-2: F=10000 families with legacy codes: P(one IP finds >=1 code in a day) = 0.6683%; IPs needed for ~50%/day = 104
+[INFO] P6-3: strong codes: at 2880 guesses/day/IP even 1e6 IPs need ~1e3 years per 1e0 family -> not attackable by guessing
+[OK] P7-0: assistant route built a context and handed it to the (stubbed) provider call: {"today":"2026-09-28","openCounts":{"tasks":1,"bills":0},"upcomingTasks":[{"title":"CTX-M-OWN-PRIVATE","due_date":null,"priority":"medium","status":"todo"}],"bills":[],"familyTasks":[{"title":"CTX-OWN
+[OK] P7-1: M's assistant context contains the owner's PRIVATE family-scoped task: false
+[OK] P7-2: M's context contains the family-visible task (expected): true
+[OK] P7-3: M's context contains N's private task/bill: false
+[OK] P7-4: after removal M's assistant context still contains the family's tasks: false
+[OK] P7-5: weekly-review request contains task titles: false (counts and goal titles only)
+[INFO] P8-1: voluntary leaver rejoins with the unchanged code -> 201; owner sees in activity: ["Test joined F","Test left the family","Test joined F"]
+[OK] P8-2: leaver still opens the task assigned to them: 404

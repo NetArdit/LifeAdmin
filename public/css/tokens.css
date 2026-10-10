@@ -1,0 +1,322 @@
+/* LifeAdmin design tokens — a calm, trustworthy, professional palette.
+   Deliberately avoids purple-glow "AI generated" aesthetics.
+
+   Redesign Batch 5: dark-first. The bare :root block below (LifeAdmin's
+   default — what renders with no explicit theme choice and no OS light
+   preference) now holds the DARK palette, not light. This is a
+   deliberate product-identity decision, not a fallback: previous rounds
+   only ever reached dark mode as an opt-in via Settings -> Appearance,
+   so the vast majority of real usage never saw it. Making it the
+   default is a mechanical inversion of the exact same three-tier system
+   this file has used all along — nothing about the THEME MECHANISM
+   changed, only which palette occupies which tier:
+     - bare :root                                            = dark (new default)
+     - @media(prefers-color-scheme:light) :not([data-theme="dark"]) = light (OS opted in)
+     - :root[data-theme="light"]                              = light (explicit choice)
+     - :root[data-theme="dark"]                                = dark (explicit choice, same as default)
+   Settings -> Appearance's System/Light/Dark toggle, applyTheme() and
+   the pre-paint script in index.html are all unchanged and need no
+   updates — they only ever set/read a 'light'/'dark'/absent data-theme
+   attribute, never which palette that attribute maps to. */
+:root {
+  /* Brand — Redesign Batch 2: a deep petrol/teal-blue. The previous plum
+     brand read as too pink/feminine in practice (explicit user feedback),
+     and the one before that (a pale corporate blue) sat in the same hue
+     family as the --accent-reasoning module color and read as generic.
+     Petrol is a confident, saturated blue-green — distinct from the
+     desaturated reasoning slate, distinct from the money/nature greens
+     (further round the wheel, cooler), gender-neutral, and nowhere near
+     --danger's orange-red. It carries a full tonal scale (icy tint to
+     near-black ink), never used as one flat hue. This scale itself is
+     theme-independent (used by both light and dark blocks below). */
+  --brand-50: #eaf5f6;
+  --brand-100: #cfe8ea;
+  --brand-200: #a0d2d6;
+  --brand-300: #6ab3ba;
+  --brand-400: #3f939c;
+  --brand-500: #297680;
+  --brand-600: #1d5e68;
+  --brand-700: #164b53;
+  --brand-800: #123c43;
+  --brand-900: #0d2e33;
+
+  /* Accent (positive / eco / success) — theme-independent */
+  --accent-400: #4fae8e;
+  --accent-500: #2f8f6f;
+  --accent-600: #23735a;
+
+  /* Status — theme-independent */
+  --danger-400: #e5695a;
+  --danger-500: #d1453a;
+  --danger-600: #ad3730;
+  --warning-400: #eab04a;
+  --warning-500: #d99527;
+  --warning-600: #b3791b;
+  --info-500: #3c7fb0;
+
+  /* Subtle semantic backgrounds — a tinted surface for badges/alerts/
+     callouts that communicates status without filling the area with a
+     fully-saturated color (full-strength success/warning/danger stay
+     reserved for text, icons and borders, keeping large surfaces
+     restrained). Introduced as reusable tokens in Phase 2.5 — same
+     color-mix() values several badge classes already computed inline, now
+     named once instead of repeated. */
+  --success-subtle: color-mix(in srgb, var(--accent-500) 14%, transparent);
+  --warning-subtle: color-mix(in srgb, var(--warning-500) 14%, transparent);
+  --danger-subtle: color-mix(in srgb, var(--danger-500) 12%, transparent);
+
+  /* Priority accents — theme-independent */
+  --priority-critical: #d1453a;
+  --priority-high: #d99527;
+  --priority-medium: #3c7fb0;
+  --priority-low: #7c8794;
+
+  /* Priority BADGE text/background pairs — dark-theme values (the new
+     default). Independently computed against dark surfaces, not
+     inverted from light (see the light block far below for the
+     light-theme half of these same WCAG-verified pairs, each ≥4.5:1). */
+  --badge-critical-bg: #352427;
+  --badge-critical-text: #ff9a8f;
+  --badge-high-bg: #363024;
+  --badge-high-text: #ffcf7a;
+  --badge-medium-bg: #202c38;
+  --badge-medium-text: #9cc7e8;
+  --badge-low-bg: #292e34;
+  --badge-low-text: #c3c9d1;
+
+  /* Module accent system — dark-theme values (the new default). Four
+     purpose-mapped accents, each an independent, per-theme-defined hue.
+     Governance (unchanged from earlier batches): a module accent may
+     appear ONLY as a hero/list-region border, a section-label's text
+     color, or a row-icon's tint — never as a full-surface fill, never on
+     a button, never as body text. -border and -strong alias the same
+     base color (see the light block below for the full WCAG rationale,
+     which applies identically here); -muted is a small, icon-sized tint
+     only. */
+  --accent-money: #5fb3a3;
+  --accent-money-border: var(--accent-money);
+  --accent-money-strong: var(--accent-money);
+  --accent-money-muted: color-mix(in srgb, var(--accent-money) 15%, transparent);
+
+  --accent-warmth: #d99a6c;
+  --accent-warmth-border: var(--accent-warmth);
+  --accent-warmth-strong: var(--accent-warmth);
+  --accent-warmth-muted: color-mix(in srgb, var(--accent-warmth) 15%, transparent);
+
+  --accent-reasoning: #a7b4c9;
+  --accent-reasoning-border: var(--accent-reasoning);
+  --accent-reasoning-strong: var(--accent-reasoning);
+  --accent-reasoning-muted: color-mix(in srgb, var(--accent-reasoning) 15%, transparent);
+
+  --accent-nature: #7ec28e;
+  --accent-nature-border: var(--accent-nature);
+  --accent-nature-strong: var(--accent-nature);
+  --accent-nature-muted: color-mix(in srgb, var(--accent-nature) 15%, transparent);
+
+  /* Typographic roles — theme-independent */
+  --type-section-label: 560 var(--fs-md)/1.3 var(--font-serif);
+  --type-date-group: 560 var(--fs-lg)/1.3 var(--font-serif);
+
+  /* Neutrals — theme-independent raw scale, consumed by the light block
+     below via var(); the dark block here uses its own literal values
+     directly (same pattern this file has always used). */
+  --n-0: #ffffff;
+  --n-25: #fbfbfa;
+  --n-50: #f5f5f3;
+  --n-100: #ececea;
+  --n-150: #e2e2df;
+  --n-200: #d7d7d3;
+  --n-300: #bcbcb6;
+  --n-400: #96968f;
+  --n-500: #74746d;
+  --n-600: #57574f;
+  --n-700: #403f3a;
+  --n-800: #2b2a26;
+  --n-900: #1a1917;
+
+  /* Semantic — dark mode (default) */
+  --bg: #14161a;
+  --bg-elevated: #1c1f24;
+  --bg-sunken: #101216;
+  --bg-hover: #262a30;
+  --surface-border: #2c3037;
+  --surface-border-strong: #383d45;
+
+  --text-primary: #f1f1ee;
+  --text-secondary: #b6b8bd;
+  --text-tertiary: #83868d;
+  --text-inverse: #1a1917;
+
+  --brand: #74c3cc;
+  --brand-strong: #99d6dd;
+  --brand-soft: #132a2d;
+  --brand-soft-border: #1e3e42;
+  /* --brand here is a LIGHT teal tint (for its own legibility against
+     this dark default), so anything filled with --brand/--gradient-brand
+     (.btn-primary, .pill.active) needs DARK text, not white — the same
+     reasoning this file has used since dark mode was first added, now
+     just true by default rather than only when explicitly opted into. */
+  --text-on-brand: var(--text-inverse);
+
+  --focus-ring: 0 0 0 3px rgba(116, 195, 204, 0.45);
+  /* Visual Polish Pass — layered, softer shadows (two shadows stacked: a
+     tight contact shadow + a broader ambient one) read as more "designed"
+     than a single flat blur, while staying restrained/neutral in hue. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55), 0 6px 16px rgba(0, 0, 0, 0.3);
+  /* A soft, brand-tinted glow reserved for primary/interactive elements on
+     hover/focus — used sparingly (never as a resting-state shadow) so it
+     reads as a deliberate lift, not an ambient effect. */
+  --shadow-glow-brand: 0 8px 26px -6px color-mix(in srgb, var(--brand) 55%, transparent), 0 2px 10px rgba(0, 0, 0, 0.35);
+  --gradient-brand: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+  /* Two easing curves for all interactive transitions: -smooth (a gentle
+     ease-out, used for most hover/focus states) and -spring (a slight
+     overshoot, reserved for small, discrete state changes — a check
+     toggling, a tab underline landing — never for large-surface motion). */
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Type scale */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.9375rem;
+  --fs-md: 1.0625rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 1.875rem;
+  --fs-3xl: 2.25rem;
+
+  /* Spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Redesign Batch 2: a rounder, softer shape language across every
+     surface that references these — cards, inputs, modals, menus, icon
+     chips — replacing the tighter, more "admin panel" corners before. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  --transition-fast: 140ms var(--ease-smooth);
+  --transition-base: 240ms var(--ease-smooth);
+
+  /* C3 Phase 1: the app shell is now a two-row sticky header (brand/switch/
+     account row + module rail row), not a fixed-width sidebar or a
+     single-row topbar, so its real height isn't a constant the way
+     --sidebar-width/--topbar-height/--bottomnav-height used to be — it's
+     measured live off the DOM and written here by app.js (see
+     measureShellChromeHeight()) after every shell render and on resize.
+     112px is only the pre-measurement fallback (keeps calc() valid for
+     the instant before that first measurement runs), not a value any
+     layout should be tuned against. */
+  --shell-chrome-height: 112px;
+}
+
+/* Light theme — Redesign Batch 5: unlike every earlier version of this
+   file, light is now reachable ONLY by an explicit choice in Settings ->
+   Appearance, never by matching the OS. There is deliberately no
+   `@media (prefers-color-scheme: light)` block: "dark-first" means the
+   app opens dark for every visitor regardless of their system setting —
+   an unconditional default, not one more OS-aware toggle. (The inverse,
+   `prefers-color-scheme: dark`, needs no block at all for the same
+   reason: the bare :root above already IS dark, so an OS dark preference
+   has nothing to add.) */
+:root[data-theme="light"] {
+  --badge-critical-bg: #f9e5e3;
+  --badge-critical-text: #8f2c24;
+  --badge-high-bg: #faf0e1;
+  --badge-high-text: #7a5310;
+  --badge-medium-bg: #e4edf4;
+  --badge-medium-text: #1f5177;
+  --badge-low-bg: #edeef0;
+  --badge-low-text: #50565f;
+
+  --accent-money: #1f6f63;
+  --accent-warmth: #96502a;
+  --accent-reasoning: #48566d;
+  --accent-nature: #3f7a4a;
+
+  --bg: var(--n-25);
+  --bg-elevated: var(--n-0);
+  --bg-sunken: var(--n-50);
+  --bg-hover: var(--n-100);
+  --surface-border: var(--n-150);
+  --surface-border-strong: var(--n-200);
+
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-tertiary: var(--n-500);
+  --text-inverse: var(--n-0);
+  --text-on-brand: #ffffff;
+
+  --brand: var(--brand-600);
+  --brand-strong: var(--brand-700);
+  --brand-soft: var(--brand-50);
+  --brand-soft-border: var(--brand-100);
+
+  --focus-ring: 0 0 0 3px rgba(29, 94, 104, 0.35);
+
+  --shadow-sm: 0 1px 2px rgba(26, 25, 23, 0.05), 0 1px 1px rgba(26, 25, 23, 0.04);
+  --shadow-md: 0 6px 16px rgba(26, 25, 23, 0.08), 0 2px 6px rgba(26, 25, 23, 0.05);
+  --shadow-lg: 0 16px 40px rgba(26, 25, 23, 0.14), 0 4px 12px rgba(26, 25, 23, 0.08);
+  --shadow-glow-brand: 0 8px 24px -6px color-mix(in srgb, var(--brand) 45%, transparent), 0 2px 8px rgba(26, 25, 23, 0.08);
+  --gradient-brand: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+}
+
+/* Explicit dark choice — identical to the bare :root default above,
+   restated so it deterministically wins over an OS light preference
+   regardless of setting (same pattern the light block above uses). */
+:root[data-theme="dark"] {
+  --badge-critical-bg: #352427;
+  --badge-critical-text: #ff9a8f;
+  --badge-high-bg: #363024;
+  --badge-high-text: #ffcf7a;
+  --badge-medium-bg: #202c38;
+  --badge-medium-text: #9cc7e8;
+  --badge-low-bg: #292e34;
+  --badge-low-text: #c3c9d1;
+
+  --accent-money: #5fb3a3;
+  --accent-warmth: #d99a6c;
+  --accent-reasoning: #a7b4c9;
+  --accent-nature: #7ec28e;
+
+  --bg: #14161a;
+  --bg-elevated: #1c1f24;
+  --bg-sunken: #101216;
+  --bg-hover: #262a30;
+  --surface-border: #2c3037;
+  --surface-border-strong: #383d45;
+
+  --text-primary: #f1f1ee;
+  --text-secondary: #b6b8bd;
+  --text-tertiary: #83868d;
+  --text-inverse: #1a1917;
+
+  --brand: #74c3cc;
+  --brand-strong: #99d6dd;
+  --brand-soft: #132a2d;
+  --brand-soft-border: #1e3e42;
+  --text-on-brand: var(--text-inverse);
+
+  --focus-ring: 0 0 0 3px rgba(116, 195, 204, 0.45);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55), 0 6px 16px rgba(0, 0, 0, 0.3);
+  --shadow-glow-brand: 0 8px 26px -6px color-mix(in srgb, var(--brand) 55%, transparent), 0 2px 10px rgba(0, 0, 0, 0.35);
+  --gradient-brand: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+}
