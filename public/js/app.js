@@ -52,7 +52,7 @@ const VIEW_SWITCH_ITEMS = [
   { key: 'timeline', label: 'Ledger' },
 ];
 const RAIL_ITEMS = [
-  { key: 'family', label: 'Family', icon: 'family' },
+  { key: 'family', label: 'Circle', icon: 'family' },
   { key: 'billsense', label: 'Bills', icon: 'bill' },
   { key: 'goals', label: 'Goals', icon: 'goal' },
   { key: 'decisionflow', label: 'Decisions', icon: 'decision' },

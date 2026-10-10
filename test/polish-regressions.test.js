@@ -32,6 +32,19 @@ test('polish regressions', async (t) => {
     assert.equal((await c.post(`/api/bills/${bill.id}/pay`, {})).status, 200);
   });
 
+  await t.test('bill totals are kept per currency, never added across currencies', async () => {
+    const c = await client();
+    await c.post('/api/bills', { name: 'Rent', amount: 400, dueDate: '2026-11-01', category: 'rent', recurrence: 'monthly' });
+    await c.post('/api/bills', { name: 'Internet', amount: 25, dueDate: '2026-11-01', category: 'internet', recurrence: 'monthly' });
+    await c.post('/api/bills', { name: 'Hosting', amount: 20, currency: 'USD', dueDate: '2026-11-01', category: 'subscription', recurrence: 'monthly' });
+    const stats = (await c.get('/api/bills/stats')).data.stats;
+    assert.equal(stats.currency, 'EUR');
+    assert.equal(stats.mixedCurrencies, true);
+    assert.equal(stats.monthlyTotal, 425);
+    assert.deepEqual(stats.monthlyTotals, [{ currency: 'EUR', total: 425 }, { currency: 'USD', total: 20 }]);
+    assert.deepEqual(stats.byCategory, { rent: 400, internet: 25 });
+  });
+
   await t.test('deleting the last milestone of a completed goal returns it to active at 0%', async () => {
     const c = await client();
     const goal = (await c.post('/api/goals', { title: 'Goal' })).data.goal;

@@ -123,6 +123,9 @@ export function Family({ ctx }) {
           <Icon name="alert" cls="icon-lg" />
           <h3>Couldn&apos;t load this page</h3>
           <p>{error.message}</p>
+          <button className="btn" style={{ marginTop: 'var(--sp-2)' }} onClick={refetch}>
+            Try again
+          </button>
         </div>
       </div>
     );
@@ -139,7 +142,7 @@ export function Family({ ctx }) {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Family</h1>
+          <h1 className="page-title">Circle</h1>
           <p className="page-subtitle">Shared responsibilities, chat, and activity.</p>
         </div>
         <div className="page-actions">
@@ -177,7 +180,7 @@ export function Family({ ctx }) {
           existing brand color when an ancestor actually wears a
           module-accent class — Assistant's own tabs (no accent) are
           unaffected. */}
-      <div className="tabs family-tabs-wrap module-accent--warmth" role="tablist" aria-label="Family sections" onKeyDown={handleTabKeyDown}>
+      <div className="tabs family-tabs-wrap module-accent--warmth" role="tablist" aria-label="Circle sections" onKeyDown={handleTabKeyDown}>
         {TABS.map(([key, label]) => (
           <div
             key={key}

@@ -69,7 +69,7 @@ router.post(
   '/',
   asyncRoute(async (req, res) => {
     const name = req.body && req.body.name;
-    if (!isNonEmpty(name)) throw new ValidationError('Family name is required.');
+    if (!isNonEmpty(name)) throw new ValidationError('Circle name is required.');
 
     const code = newUniqueInviteCode();
 
@@ -86,7 +86,7 @@ router.post(
       userId: req.user.id,
       familyId: result.lastInsertRowid,
       type: 'member_joined',
-      summary: `${req.user.first_name} created the family "${name.trim()}"`,
+      summary: `${req.user.first_name} created the circle "${name.trim()}"`,
     });
 
     const f = db.get('SELECT * FROM families WHERE id = ?', [result.lastInsertRowid]);
@@ -121,7 +121,7 @@ router.post(
     }
 
     const already = db.get('SELECT id FROM family_members WHERE family_id = ? AND user_id = ?', [family.id, req.user.id]);
-    if (already) throw new ValidationError('You are already a member of this family.');
+    if (already) throw new ValidationError('You are already a member of this circle.');
 
     const placeholder = db.get(
       'SELECT * FROM family_members WHERE family_id = ? AND user_id IS NULL AND phone = ?',
@@ -149,7 +149,7 @@ router.get(
   asyncRoute(async (req, res) => {
     requireMembership(req.user.id, Number(req.params.id));
     const f = db.get('SELECT * FROM families WHERE id = ?', [req.params.id]);
-    if (!f) return res.status(404).json({ error: 'Family not found.' });
+    if (!f) return res.status(404).json({ error: 'Circle not found.' });
     res.json({ family: mapFamily(f, membersFor(f.id), req.user.id) });
   })
 );
@@ -175,7 +175,7 @@ router.post(
         familyId,
         matchedUser.id,
       ]);
-      if (already) throw new ValidationError('This person is already in the family.');
+      if (already) throw new ValidationError('This person is already in the circle.');
     } else if (existingMember) {
       throw new ValidationError('This phone number was already invited.');
     }
@@ -231,7 +231,7 @@ router.delete(
     requireRole(req.user.id, familyId, ['owner', 'admin']);
     const member = db.get('SELECT * FROM family_members WHERE id = ? AND family_id = ?', [req.params.memberId, familyId]);
     if (!member) return res.status(404).json({ error: 'Member not found.' });
-    if (member.role === 'owner') throw new ValidationError('Cannot remove the family owner.');
+    if (member.role === 'owner') throw new ValidationError('Cannot remove the circle owner.');
     db.tx(() => {
       db.run('DELETE FROM family_members WHERE id = ?', [member.id]);
       // The removed person's bills must not keep feeding this family's feed.
@@ -312,9 +312,9 @@ router.post(
     const familyId = Number(req.params.id);
     const me = requireMembership(req.user.id, familyId);
     const family = db.get('SELECT * FROM families WHERE id = ?', [familyId]);
-    if (!family) return res.status(404).json({ error: 'Family not found.' });
+    if (!family) return res.status(404).json({ error: 'Circle not found.' });
     if (me.role === 'owner' || family.owner_id === req.user.id) {
-      throw new ValidationError('Transfer ownership to another member before leaving this family.');
+      throw new ValidationError('Transfer ownership to another member before leaving this circle.');
     }
     db.tx(() => {
       db.run('DELETE FROM family_members WHERE id = ?', [me.id]);
@@ -324,7 +324,7 @@ router.post(
       userId: req.user.id,
       familyId,
       type: 'member_left',
-      summary: `${req.user.first_name} left the family`,
+      summary: `${req.user.first_name} left the circle`,
     });
     res.json({ ok: true });
   })

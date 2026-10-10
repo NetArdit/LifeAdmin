@@ -68,11 +68,21 @@ router.get(
     const unpaid = rows.filter((b) => b.status === 'unpaid');
     const overdue = unpaid.filter((b) => b.due_date < today);
     const upcoming = unpaid.filter((b) => b.due_date >= today && daysUntil(b.due_date) <= 14);
-    const monthlyTotal = rows
-      .filter((b) => b.recurrence === 'monthly')
-      .reduce((sum, b) => sum + b.amount, 0);
+    // Amounts in different currencies are never added together. The currency
+    // most bills use is the primary one: monthlyTotal and byCategory cover it
+    // alone, and monthlyTotals carries one total for every currency in use.
+    const perCurrency = {};
+    for (const b of rows) perCurrency[b.currency] = (perCurrency[b.currency] || 0) + 1;
+    const currencies = Object.keys(perCurrency).sort((a, b) => perCurrency[b] - perCurrency[a]);
+    const currency = currencies[0] || 'EUR';
+    const monthlyByCurrency = {};
+    for (const b of rows.filter((r) => r.recurrence === 'monthly')) {
+      monthlyByCurrency[b.currency] = (monthlyByCurrency[b.currency] || 0) + b.amount;
+    }
+    const monthlyTotal = monthlyByCurrency[currency] || 0;
+    const monthlyTotals = currencies.filter((c) => monthlyByCurrency[c]).map((c) => ({ currency: c, total: monthlyByCurrency[c] }));
     const byCategory = {};
-    for (const b of rows) {
+    for (const b of rows.filter((r) => r.currency === currency)) {
       byCategory[b.category] = (byCategory[b.category] || 0) + b.amount;
     }
     const highest = [...rows].sort((a, b) => b.amount - a.amount).slice(0, 5);
@@ -96,6 +106,9 @@ router.get(
     res.json({
       stats: {
         monthlyTotal,
+        monthlyTotals,
+        currency,
+        mixedCurrencies: currencies.length > 1,
         paidThisMonth,
         paidThisMonthCount: paidThisMonth.reduce((n, p) => n + p.count, 0),
         overdueCount: overdue.length,
@@ -140,7 +153,7 @@ router.post(
     // (403 otherwise, same response whether or not that family exists).
     let familyId = null;
     if (b.familyId !== undefined && b.familyId !== null) {
-      if (!Number.isInteger(b.familyId) || b.familyId < 1) throw new ValidationError('Invalid family.', { familyId: 'Invalid' });
+      if (!Number.isInteger(b.familyId) || b.familyId < 1) throw new ValidationError('Invalid circle.', { familyId: 'Invalid' });
       requireMembership(req.user.id, b.familyId);
       familyId = b.familyId;
     }
@@ -175,7 +188,7 @@ router.patch(
     // (there is no move / detach operation). A PATCH may repeat the current value but
     // can never attach, move or clear it — that is what closes cross-family editing.
     if (b.familyId !== undefined && (b.familyId === null ? null : b.familyId) !== bill.family_id) {
-      throw new ValidationError("A bill's family can't be changed after it is created.", { familyId: 'Not editable' });
+      throw new ValidationError("A bill's circle can't be changed after it is created.", { familyId: 'Not editable' });
     }
     // Same rules as creating a bill: an edit must not store what a create would refuse.
     if (b.name !== undefined && !isNonEmpty(b.name)) throw new ValidationError('Bill name is required.', { name: 'Required' });

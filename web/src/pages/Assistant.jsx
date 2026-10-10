@@ -74,7 +74,7 @@ export function Assistant({ ctx }) {
       <div className="page-header">
         <div>
           <h1 className="page-title">Assistant</h1>
-          <p className="page-subtitle">Ask about your week, priorities, bills, or family — grounded only in your real data.</p>
+          <p className="page-subtitle">Ask about your week, priorities, bills, or your circle — grounded only in your real data.</p>
         </div>
         <div className="page-actions">
           <button className="btn" onClick={() => openWeeklyReviewModal({ api, toast, aiConfigured: state.aiConfigured })}>

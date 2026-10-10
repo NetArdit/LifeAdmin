@@ -19,7 +19,7 @@ export function mount(root, onAuthed) {
           <div class="auth-brand"><span class="brand-mark" style="width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;font-weight:800;">L</span>LifeAdmin</div>
           <div>
             <h1>Tell LifeAdmin what's happening in your life.</h1>
-            <p>It helps you organize what should happen next — tasks, bills, family responsibilities, decisions and goals, in one calm place.</p>
+            <p>It helps you organize what should happen next — tasks, bills, shared responsibilities, decisions and goals, in one calm place.</p>
           </div>
           <p style="font-size:var(--fs-xs);color:rgba(255,255,255,0.55)">Local-first · Your data stays on this machine</p>
         </div>

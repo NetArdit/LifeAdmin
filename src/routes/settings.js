@@ -144,8 +144,8 @@ router.delete(
       );
       throw new ValidationError(
         hasCandidate
-          ? "You own a family, so this account can't be deleted yet. Transfer ownership to another member first (Family → Members → Make owner), then try again."
-          : "You own a family and are its only registered member, so this account can't be deleted yet. Ask someone to join with the invite code, transfer ownership to them, then try again. Deleting a family isn't available in LifeAdmin yet."
+          ? "You own a circle, so this account can't be deleted yet. Transfer ownership to another member first (Circle → Members → Make owner), then try again."
+          : "You own a circle and are its only registered member, so this account can't be deleted yet. Ask someone to join with the invite code, transfer ownership to them, then try again. Deleting a circle isn't available in LifeAdmin yet."
       );
     }
 

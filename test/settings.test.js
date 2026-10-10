@@ -168,7 +168,7 @@ test('settings', async (t) => {
 
     const res = await c.del('/api/settings/account', { password: payload.password });
     assert.equal(res.status, 400);
-    assert.match(res.data.error, /family/i);
+    assert.match(res.data.error, /circle/i);
 
     // The account, and the family, must both still exist.
     const me = await c.get('/api/auth/me');

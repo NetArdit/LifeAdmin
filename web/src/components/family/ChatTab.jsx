@@ -84,7 +84,7 @@ export function ChatTab({ api, toast, myUserId, familyId }) {
         <form className="chat-input-row" onSubmit={handleSubmit}>
           <input
             className="input"
-            placeholder="Message the family…"
+            placeholder="Message the circle…"
             style={{ flex: 1 }}
             autoComplete="off"
             value={inputValue}

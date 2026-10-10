@@ -32,10 +32,10 @@ function forbidden(message) {
 function validateAssignment(assignedTo, familyId) {
   if (assignedTo == null) return;
   if (!familyId) {
-    throw new ValidationError('Assigning a task requires selecting a family.', { assignedTo: 'Select a family to assign this task within.' });
+    throw new ValidationError('Assigning a task requires selecting a circle.', { assignedTo: 'Select a circle to assign this task within.' });
   }
   if (!getMembership(assignedTo, familyId)) {
-    throw new ValidationError('The assignee must be a member of the selected family.', { assignedTo: 'Not a member of this family.' });
+    throw new ValidationError('The assignee must be a member of the selected circle.', { assignedTo: 'Not a member of this circle.' });
   }
 }
 
@@ -202,7 +202,7 @@ router.post(
     if (familyId && visibility === 'family') {
       notifyFamily(familyId, req.user.id, {
         type: 'family',
-        title: 'New family task',
+        title: 'New circle task',
         body: b.title.trim(),
         link: `#/tasks/${result.lastInsertRowid}`,
       });
@@ -303,7 +303,7 @@ router.patch(
     // A task's family is fixed once set: a request naming a DIFFERENT family is
     // refused (same rule as bills). Repeating the current one is harmless.
     if (b.familyId != null && t.family_id != null && Number(b.familyId) !== t.family_id) {
-      throw new ValidationError("A task can't be moved to a different family.", { familyId: 'Not editable' });
+      throw new ValidationError("A task can't be moved to a different circle.", { familyId: 'Not editable' });
     }
 
     // VISIBILITY — a privacy property of the OWNER. The edit form submits it on every
@@ -315,7 +315,7 @@ router.patch(
       if (b.visibility === 'family') {
         // Sharing with a family needs a family the owner currently belongs to.
         const target = t.family_id != null ? t.family_id : b.familyId;
-        if (!Number.isInteger(target)) throw new ValidationError('Choose a family to share this task with.', { familyId: 'Required' });
+        if (!Number.isInteger(target)) throw new ValidationError('Choose a circle to share this task with.', { familyId: 'Required' });
         requireMembership(req.user.id, target);
         if (t.family_id == null) {
           fields.push('family_id = ?');

@@ -23,7 +23,7 @@ export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) 
   async function handleRemove(memberId) {
     const ok = await confirmDialog({
       title: 'Remove member?',
-      message: 'They will lose access to shared family data.',
+      message: 'They will lose access to shared circle data.',
       confirmLabel: 'Remove',
     });
     if (!ok) return;
@@ -57,18 +57,18 @@ export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) 
 
   async function handleLeave() {
     const ok = await confirmDialog({
-      title: 'Leave this family?',
+      title: 'Leave this circle?',
       message:
         `You will lose access to “${family.name}” and its shared data. ` +
         'Your account and personal data stay as they are. You can rejoin later only with a new invite.',
-      confirmLabel: 'Leave family',
+      confirmLabel: 'Leave circle',
     });
     if (!ok) return;
     try {
       await api.post(`/api/family/${familyId}/leave`, {});
-      toast('You left the family', 'success');
+      toast('You left the circle', 'success');
     } catch (err) {
-      toast((err && err.message) || 'Could not leave the family', 'error');
+      toast((err && err.message) || 'Could not leave the circle', 'error');
     }
     onChanged();
   }
@@ -101,13 +101,13 @@ export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) 
       {isOwner ? (
         <p className="text-xs muted member-lifecycle-note">
           {hasOtherRegistered
-            ? 'You own this family. To leave it, or to delete your account, first transfer ownership with “Make owner” on another member.'
-            : 'You own this family and are its only registered member, so you can’t leave it or transfer ownership yet. Invite someone to join first.'}
+            ? 'You own this circle. To leave it, or to delete your account, first transfer ownership with “Make owner” on another member.'
+            : 'You own this circle and are its only registered member, so you can’t leave it or transfer ownership yet. Invite someone to join first.'}
         </p>
       ) : (
         <div className="member-lifecycle-note">
           <button className="btn btn-sm" onClick={handleLeave}>
-            Leave family
+            Leave circle
           </button>
         </div>
       )}

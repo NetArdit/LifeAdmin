@@ -62,7 +62,7 @@ export function ActivityCard({ activity }) {
   return (
     <div className="card card-pad">
       <div className="card-header">
-        <span className="card-title">Family activity</span>
+        <span className="card-title">Circle activity</span>
       </div>
       {activity.length ? (
         <div className="row-list">
@@ -71,7 +71,7 @@ export function ActivityCard({ activity }) {
           ))}
         </div>
       ) : (
-        <p className="muted text-sm">No family activity yet. Create a family to share tasks and updates.</p>
+        <p className="muted text-sm">No circle activity yet. Create a circle to share tasks and updates.</p>
       )}
     </div>
   );

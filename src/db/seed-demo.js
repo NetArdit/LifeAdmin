@@ -26,7 +26,7 @@ function seedDemoForUser(userId) {
     do {
       code = generateInviteCode();
     } while (db.get('SELECT id FROM families WHERE invite_code = ?', [code]));
-    const r = db.run('INSERT INTO families (name, invite_code, owner_id) VALUES (?, ?, ?)', ['The Demo Family', code, userId]);
+    const r = db.run('INSERT INTO families (name, invite_code, owner_id) VALUES (?, ?, ?)', ['The Demo Circle', code, userId]);
     family = db.get('SELECT * FROM families WHERE id = ?', [r.lastInsertRowid]);
     db.run("INSERT INTO family_members (family_id, user_id, role) VALUES (?, ?, 'owner')", [family.id, userId]);
     db.run(

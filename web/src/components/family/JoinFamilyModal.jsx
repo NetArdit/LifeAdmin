@@ -19,7 +19,7 @@ function JoinFamilyFields() {
 export function openJoinFamilyModal({ api, toast, onJoined }) {
   let root = null;
   openModal({
-    title: 'Join a family',
+    title: 'Join a circle',
     bodyHtml: '<div id="join-family-form-mount"></div>',
     footerHtml: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="join-family-save">Join</button>`,
     onMount: (modalRoot) => {

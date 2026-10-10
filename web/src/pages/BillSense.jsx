@@ -107,7 +107,11 @@ export function BillSense({ ctx }) {
 
       <div className="stat-row">
         <div className="card card-pad stat-tile">
-          <div className="stat-value">{fmtMoney(stats.monthlyTotal)}</div>
+          <div className="stat-value">
+            {stats.monthlyTotals?.length
+              ? stats.monthlyTotals.map((m) => fmtMoney(m.total, m.currency)).join(' + ')
+              : fmtMoney(stats.monthlyTotal, stats.currency)}
+          </div>
           <div className="stat-label">Monthly total</div>
         </div>
         {/* What "Mark as paid" has actually recorded this month. Replaces the
@@ -170,9 +174,9 @@ export function BillSense({ ctx }) {
         <div className="stack">
           <div className="card card-pad">
             <div className="card-header">
-              <span className="card-title">By category</span>
+              <span className="card-title">By category{stats.mixedCurrencies ? ` (${stats.currency} only)` : ''}</span>
             </div>
-            <CategoryBars byCategory={stats.byCategory} />
+            <CategoryBars byCategory={stats.byCategory} currency={stats.currency} />
           </div>
           {overdue.length ? <OverdueCard bills={overdue} /> : null}
         </div>

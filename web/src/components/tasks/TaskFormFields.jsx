@@ -98,12 +98,12 @@ export function TaskFormFields({ existing, families, canChangeVisibility = true 
       </div>
       {families.length && canChangeVisibility ? (
         <div className="field">
-          <label className="field-label">Family</label>
+          <label className="field-label">Circle</label>
           <select className="select" name="familyId" defaultValue={initialFamilySelection(existing)}>
             <option value="">Private (only me)</option>
             {families.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.name} — visible to family
+                {f.name} — visible to the circle
               </option>
             ))}
           </select>

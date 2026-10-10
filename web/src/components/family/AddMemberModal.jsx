@@ -21,7 +21,7 @@ function AddMemberFields() {
 export function openAddMemberModal({ api, toast, familyId, onAdded }) {
   let root = null;
   openModal({
-    title: 'Add a family member',
+    title: 'Add a member',
     bodyHtml: '<div id="member-form-mount"></div>',
     footerHtml: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="add-member-save">Add member</button>`,
     onMount: (modalRoot) => {

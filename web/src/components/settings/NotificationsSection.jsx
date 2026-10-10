@@ -3,7 +3,7 @@ import { useState } from 'react';
 const ITEMS = [
   ['task', 'Task reminders & deadlines'],
   ['comment', 'Comments on shared items'],
-  ['chat', 'Family chat messages'],
+  ['chat', 'Circle chat messages'],
   ['bill', 'Bill due dates'],
 ];
 

@@ -13,7 +13,7 @@ function getMembership(userId, familyId) {
 function requireMembership(userId, familyId) {
   const m = getMembership(userId, familyId);
   if (!m) {
-    const err = new ValidationError('You are not a member of this family.');
+    const err = new ValidationError('You are not a member of this circle.');
     err.status = 403;
     throw err;
   }

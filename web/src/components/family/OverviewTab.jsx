@@ -15,7 +15,7 @@ export function OverviewTab({ api, toast, familyId, family, myRole, onChanged })
     const ok = await confirmDialog({
       title: 'Create a new invite code?',
       message:
-        'The current code will stop working right away. People already in the family stay; ' +
+        'The current code will stop working right away. People already in the circle stay; ' +
         'anyone you gave the old code to will need the new one.',
       confirmLabel: 'Create new code',
       danger: false,
@@ -122,7 +122,7 @@ export function OverviewTab({ api, toast, familyId, family, myRole, onChanged })
             ))}
           </div>
         ) : (
-          <p className="muted text-sm">No shared tasks yet. Create a task and set visibility to family.</p>
+          <p className="muted text-sm">No shared tasks yet. Create a task and set visibility to circle.</p>
         )}
       </div>
       <div className="card card-pad">
@@ -135,7 +135,7 @@ export function OverviewTab({ api, toast, familyId, family, myRole, onChanged })
           </p>
         ) : (
           <p className="text-sm muted">
-            Only the family owner can see and share the invite code. Ask the owner if you would like to invite someone.
+            Only the circle owner can see and share the invite code. Ask the owner if you would like to invite someone.
           </p>
         )}
         <div className="row" style={{ marginTop: 'var(--sp-2)', flexWrap: 'wrap' }}>

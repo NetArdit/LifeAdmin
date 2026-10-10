@@ -21,7 +21,7 @@ export function OnboardingCard({ onSeedDemo }) {
       <div style={{ flex: 1 }}>
         <strong>Get started with LifeAdmin</strong>
         <p className="text-sm muted" style={{ marginTop: 2 }}>
-          Add a real task or bill, create a family, or load sample data to see everything in action.
+          Add a real task or bill, create a circle, or load sample data to see everything in action.
         </p>
       </div>
       <button className="btn btn-primary" disabled={seeding} onClick={handleClick}>

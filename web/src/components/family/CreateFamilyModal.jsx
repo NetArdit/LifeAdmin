@@ -6,7 +6,7 @@ function CreateFamilyFields() {
   return (
     <form id="family-form" className="stack">
       <div className="field">
-        <label className="field-label">Family name</label>
+        <label className="field-label">Circle name</label>
         <input className="input" name="name" placeholder="The Smiths" required />
       </div>
     </form>
@@ -21,7 +21,7 @@ function CreateFamilyFields() {
 export function openCreateFamilyModal({ api, toast, onCreated }) {
   let root = null;
   openModal({
-    title: 'Create a family',
+    title: 'Create a circle',
     bodyHtml: '<div id="family-form-mount"></div>',
     footerHtml: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="create-family-save">Create</button>`,
     onMount: (modalRoot) => {
@@ -30,11 +30,11 @@ export function openCreateFamilyModal({ api, toast, onCreated }) {
 
       document.getElementById('create-family-save').addEventListener('click', async () => {
         const name = document.querySelector('#family-form [name=name]').value.trim();
-        if (!name) return toast('Family name is required.', 'error');
+        if (!name) return toast('Circle name is required.', 'error');
         try {
           const { family } = await api.post('/api/family', { name });
           closeModal();
-          toast('Family created', 'success');
+          toast('Circle created', 'success');
           onCreated(family);
         } catch (err) {
           toast(err.message, 'error');

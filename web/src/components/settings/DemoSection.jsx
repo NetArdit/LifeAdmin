@@ -22,7 +22,7 @@ export function DemoSection({ ctx }) {
         <span className="card-title">Demo mode</span>
       </div>
       <p className="text-sm muted" style={{ marginBottom: 'var(--sp-3)' }}>
-        Load sample tasks, bills, a family, decisions, goals and eco logs to explore LifeAdmin quickly. You can clear demo-tagged tasks/bills at any time.
+        Load sample tasks, bills, a circle, decisions, goals and eco logs to explore LifeAdmin quickly. You can clear demo-tagged tasks/bills at any time.
       </p>
       <div className="row" style={{ gap: 'var(--sp-2)' }}>
         <button className="btn btn-primary" onClick={handleSeed}>
