@@ -24,14 +24,73 @@ function getClient() {
   return client;
 }
 
+// Two providers, one at a time. Groq (GROQ_API_KEY) is used when its key is set: it has a free tier, which is
+// what the hosted LifeAdmin runs on. Otherwise Anthropic (ANTHROPIC_API_KEY), as before. Every capability
+// below goes through callStructured(), so nothing else in the application knows which one answered.
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+
+function provider() {
+  if (process.env.GROQ_API_KEY) return 'groq';
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
+  return null;
+}
+
 function isConfigured() {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return provider() !== null;
 }
 
 const NOT_CONFIGURED = {
   ok: false,
-  error: 'AI features require an ANTHROPIC_API_KEY. Add one to your .env file to enable the assistant.',
+  error: 'AI features require a GROQ_API_KEY or an ANTHROPIC_API_KEY. Add one to your .env file to enable the assistant.',
 };
+
+// The endpoint can be pointed elsewhere ONLY outside production (the tests use a local mock server), so a
+// stray setting can never send the key to another address.
+function groqEndpoint() {
+  const override = (process.env.GROQ_API_BASE || '').trim().replace(/\/+$/, '');
+  if (override && process.env.NODE_ENV !== 'production') return `${override}/chat/completions`;
+  return GROQ_ENDPOINT;
+}
+
+// Groq speaks the chat-completions dialect. It is asked for one JSON object and told the exact shape; the
+// answer is then checked against the same zod schema as any other answer. What does not pass is asked for
+// once more, and after that reported as unreadable: never passed on unchecked.
+async function callGroq({ system, prompt, schema, maxTokens }) {
+  const shape = JSON.stringify(z.toJSONSchema(schema, { reused: 'ref' }));
+  const messages = [
+    { role: 'system', content: `${system}\n\nAnswer with ONE JSON object and nothing else. It must match this JSON Schema exactly: no other keys, no text before or after it.\n${shape}` },
+    { role: 'user', content: prompt },
+  ];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Number(process.env.AI_TIMEOUT_MS) || 25000);
+    let res;
+    try {
+      res = await fetch(groqEndpoint(), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: GROQ_MODEL, max_tokens: maxTokens, temperature: 0.2, response_format: { type: 'json_object' }, messages }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      return { ok: false, error: friendlyAiError(err && err.name === 'AbortError' ? { name: 'APIConnectionTimeoutError' } : err) };
+    } finally {
+      clearTimeout(timer);
+    }
+    // Only the status is looked at: the provider's own words are never shown or logged.
+    if (!res.ok) return { ok: false, error: friendlyAiError({ status: res.status }) };
+    let parsed;
+    try {
+      const body = await res.json();
+      parsed = schema.safeParse(JSON.parse(body.choices[0].message.content));
+    } catch {
+      parsed = { success: false };
+    }
+    if (parsed.success) return { ok: true, data: parsed.data };
+  }
+  return { ok: false, error: 'AI returned a response that could not be parsed. Please try again.' };
+}
 
 // Visual Redesign Batch 11: Settings' "Use AI features" checkbox
 // (ai_enabled on `users`) was persisted and exposed to the frontend but
@@ -84,6 +143,7 @@ function zodOutputFormat(schema) {
 // Generic structured-output caller. Every AI capability in the app goes through
 // this so error handling and the model stay consistent.
 async function callStructured({ system, prompt, schema, maxTokens = 2000 }) {
+  if (provider() === 'groq') return callGroq({ system, prompt, schema, maxTokens });
   const c = getClient();
   if (!c) return NOT_CONFIGURED;
   try {

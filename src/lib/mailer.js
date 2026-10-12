@@ -12,11 +12,15 @@
 //   none   — sends nothing (production default when Resend is not configured).
 //   resend — Resend's HTTPS API (https://resend.com/docs/api-reference/emails/send-email),
 //            called with Node's built-in fetch (no SDK/dependency). The ONLY
-//            provider-specific code lives in sendViaResend() below.
+//            Resend-specific code lives in sendViaResend() below.
+//   smtp   — any SMTP server that takes a login (Brevo's relay is the one the hosted
+//            LifeAdmin uses): SMTP_HOST, SMTP_PORT (587 by default), SMTP_USER,
+//            SMTP_PASS and MAIL_FROM. The ONLY SMTP-specific code is sendViaSmtp().
 //
-// Selection: MAIL_TRANSPORT ("outbox" | "none" | "resend") if set; otherwise
-// in production "resend" when BOTH RESEND_API_KEY and MAIL_FROM are set, else
-// "none"; outside production "outbox".
+// Selection: MAIL_TRANSPORT ("outbox" | "none" | "resend" | "smtp") if set;
+// otherwise in production "resend" when BOTH RESEND_API_KEY and MAIL_FROM are
+// set, else "smtp" when SMTP_HOST, SMTP_USER, SMTP_PASS and MAIL_FROM are all
+// set, else "none"; outside production "outbox".
 //
 // Secrets: RESEND_API_KEY is read from the server environment only and is
 // never logged or returned. MAIL_FROM must be an address on a domain verified
@@ -28,9 +32,11 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 function transportName() {
   const explicit = (process.env.MAIL_TRANSPORT || '').trim().toLowerCase();
-  if (explicit === 'outbox' || explicit === 'none' || explicit === 'resend') return explicit;
+  if (explicit === 'outbox' || explicit === 'none' || explicit === 'resend' || explicit === 'smtp') return explicit;
   if (process.env.NODE_ENV === 'production') {
-    return process.env.RESEND_API_KEY && process.env.MAIL_FROM ? 'resend' : 'none';
+    if (process.env.RESEND_API_KEY && process.env.MAIL_FROM) return 'resend';
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.MAIL_FROM) return 'smtp';
+    return 'none';
   }
   return 'outbox';
 }
@@ -80,10 +86,41 @@ async function sendViaResend({ to, subject, text, html }) {
   }
 }
 
+let smtp = null;
+async function sendViaSmtp({ to, subject, text, html }) {
+  const { SMTP_HOST: host, SMTP_USER: user, SMTP_PASS: pass, MAIL_FROM: from } = process.env;
+  if (!host || !user || !pass || !from) {
+    console.error('[LifeAdmin] Mail transport is "smtp" but SMTP_HOST, SMTP_USER, SMTP_PASS and/or MAIL_FROM is not set; nothing was sent.');
+    return { delivered: false, transport: 'smtp', error: 'not_configured' };
+  }
+  const port = Number(process.env.SMTP_PORT) || 587;
+  try {
+    // Loaded on first use: an installation that sends no mail never loads it.
+    smtp ??= require('nodemailer').createTransport({
+      host,
+      port,
+      secure: port === 465,
+      // On 587 the conversation is encrypted before the password is said.
+      requireTLS: port !== 465,
+      auth: { user, pass },
+      connectionTimeout: timeoutMs(),
+      greetingTimeout: timeoutMs(),
+      socketTimeout: timeoutMs(),
+    });
+    await smtp.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+    return { delivered: true, transport: 'smtp' };
+  } catch (err) {
+    // The kind of failure only: a mail server's own words can repeat the address.
+    console.error(`[LifeAdmin] The mail server did not take a message (${(err && (err.code || err.name)) || 'error'}).`);
+    return { delivered: false, transport: 'smtp', error: err && err.responseCode ? 'provider_rejected' : 'provider_unreachable' };
+  }
+}
+
 async function sendMail({ to, subject, text, html }) {
   const transport = transportName();
   if (transport === 'none') return { delivered: false, transport, error: 'no_provider' };
   if (transport === 'resend') return sendViaResend({ to, subject, text, html });
+  if (transport === 'smtp') return sendViaSmtp({ to, subject, text, html });
 
   outbox.push({ to, subject, text, html, at: Date.now() });
   if (process.env.NODE_ENV === 'development') {

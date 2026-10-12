@@ -76,8 +76,23 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
     assert.equal(mailer.transportName(), 'resend', 'key + sender in production selects resend');
     process.env.MAIL_TRANSPORT = 'none';
     assert.equal(mailer.transportName(), 'none', 'explicit value wins');
+    process.env.MAIL_TRANSPORT = 'carrier-pigeon';
+    assert.equal(mailer.transportName(), 'resend', 'an unknown value is ignored');
+    // SMTP (Brevo's relay on the hosted site) is a transport of its own: chosen by name, or by itself in
+    // production when it is fully configured and Resend is not.
     process.env.MAIL_TRANSPORT = 'smtp';
-    assert.equal(mailer.transportName(), 'resend', 'unknown value is ignored (no SMTP fallback exists)');
+    assert.equal(mailer.transportName(), 'smtp', 'explicit smtp');
+    const kept = { key: process.env.RESEND_API_KEY, from: process.env.MAIL_FROM };
+    delete process.env.MAIL_TRANSPORT;
+    delete process.env.RESEND_API_KEY;
+    Object.assign(process.env, { SMTP_HOST: 'smtp.example.test', SMTP_USER: 'u', SMTP_PASS: 'p', MAIL_FROM: 'LifeAdmin <no-reply@example.test>' });
+    assert.equal(mailer.transportName(), 'smtp', 'production with a complete SMTP configuration and no Resend key');
+    delete process.env.SMTP_PASS;
+    assert.equal(mailer.transportName(), 'none', 'half an SMTP configuration sends nothing');
+    for (const name of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) delete process.env[name];
+    if (kept.key) process.env.RESEND_API_KEY = kept.key;
+    if (kept.from) process.env.MAIL_FROM = kept.from;
+    else delete process.env.MAIL_FROM;
     process.env.NODE_ENV = 'test';
   });
 

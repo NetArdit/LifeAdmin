@@ -59,7 +59,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`LifeAdmin running at http://localhost:${PORT}`);
     if (!ai.isConfigured()) {
-      console.log('AI features disabled — set ANTHROPIC_API_KEY in .env to enable the assistant.');
+      console.log('AI features disabled — set GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env to enable the assistant.');
     }
   });
 }
