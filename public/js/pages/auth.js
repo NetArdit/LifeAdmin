@@ -21,7 +21,7 @@ export function mount(root, onAuthed) {
             <h1>Tell LifeAdmin what's happening in your life.</h1>
             <p>It helps you organize what should happen next — tasks, bills, shared responsibilities, decisions and goals, in one calm place.</p>
           </div>
-          <p style="font-size:var(--fs-xs);color:rgba(255,255,255,0.55)">Local-first · Your data stays on this machine</p>
+          <p style="font-size:var(--fs-xs);color:rgba(255,255,255,0.55)">Private by default · Only you and your circle see your data</p>
         </div>
         <div class="auth-form-side">
           <div class="auth-card">
