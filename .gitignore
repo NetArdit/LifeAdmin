@@ -22,3 +22,6 @@ Thumbs.db
 
 # Misc
 *.tmp
+
+# Netlify local state
+.netlify/

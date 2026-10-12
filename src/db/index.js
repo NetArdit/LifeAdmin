@@ -99,7 +99,9 @@ async function openServer(url) {
 }
 
 async function openEmbedded(dir) {
-  const { PGlite } = await import('@electric-sql/pglite');
+  // Named in two pieces on purpose: a bundler that packs the hosted function must not pack this in. The
+  // hosted application always has DATABASE_URL and never comes here.
+  const { PGlite } = await import(['@electric-sql', 'pglite'].join('/'));
   if (dir !== 'memory://') fs.mkdirSync(dir, { recursive: true });
   const db = new PGlite(dir === 'memory://' ? undefined : dir, { parsers: { 20: Number, 1700: Number } });
   await db.waitReady;

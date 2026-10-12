@@ -9,14 +9,14 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node src/db/seed-demo.js",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "lint": "eslint .",
-    "build:web": "npm --prefix web install && npm --prefix web run build",
-    "postinstall": "npm run build:web"
+    "build:web": "npm --prefix web install --include=dev && npm --prefix web run build",
+    "postinstall": "npm run build:web",
+    "db:migrate": "node -e \"const db=require('./src/db');db.ready().then(()=>db.close()).then(()=>console.log('schema applied'))\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
-    "@electric-sql/pglite": "^0.5.9",
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.0.0",
@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.11.0"
+    "eslint": "^10.11.0",
+    "@electric-sql/pglite": "^0.5.9"
   }
 }
