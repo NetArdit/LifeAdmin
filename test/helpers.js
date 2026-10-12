@@ -20,6 +20,10 @@ async function startApp() {
   const dbPath = freshDbPath();
   process.env.LIFEADMIN_DB_PATH = dbPath;
   process.env.NODE_ENV = 'test';
+  // A developer's own .env may hold a real AI key. The suite must never use it: set (empty) before the
+  // server loads .env, a value that is already there is not replaced.
+  if (process.env.GROQ_API_KEY === undefined) process.env.GROQ_API_KEY = '';
+  if (process.env.ANTHROPIC_API_KEY === undefined) process.env.ANTHROPIC_API_KEY = '';
   delete require.cache[require.resolve('../server')];
   const app = require('../server');
 
