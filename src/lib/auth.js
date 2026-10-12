@@ -13,10 +13,10 @@ async function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
-function createSession(userId) {
+async function createSession(userId) {
   const id = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
-  db.run('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)', [
+  await db.run('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)', [
     id,
     userId,
     expires.toISOString(),
@@ -24,13 +24,13 @@ function createSession(userId) {
   return { id, expires };
 }
 
-function destroySession(id) {
-  db.run('DELETE FROM sessions WHERE id = ?', [id]);
+async function destroySession(id) {
+  await db.run('DELETE FROM sessions WHERE id = ?', [id]);
 }
 
-function getSessionUser(sessionId) {
+async function getSessionUser(sessionId) {
   if (!sessionId) return null;
-  const row = db.get(
+  const row = await db.get(
     `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > datetime('now')`,
     [sessionId]
@@ -61,11 +61,11 @@ function clearSessionCookie(res) {
 // Removes every session of a user, optionally keeping one (the caller's
 // current session). Used after a password change/reset so a stolen or
 // forgotten session on another device stops working.
-function deleteSessionsForUser(userId, exceptSessionId = null) {
+async function deleteSessionsForUser(userId, exceptSessionId = null) {
   if (exceptSessionId) {
-    db.run('DELETE FROM sessions WHERE user_id = ? AND id != ?', [userId, exceptSessionId]);
+    await db.run('DELETE FROM sessions WHERE user_id = ? AND id != ?', [userId, exceptSessionId]);
   } else {
-    db.run('DELETE FROM sessions WHERE user_id = ?', [userId]);
+    await db.run('DELETE FROM sessions WHERE user_id = ?', [userId]);
   }
 }
 
@@ -82,11 +82,11 @@ function hashToken(raw) {
 
 // Creates a fresh token and supersedes (marks used) any earlier unused ones,
 // so only the most recent emailed link ever works.
-function createResetToken(userId) {
+async function createResetToken(userId) {
   const now = Date.now();
-  db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [now, userId]);
+  await db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [now, userId]);
   const raw = crypto.randomBytes(32).toString('base64url');
-  db.run('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)', [
+  await db.run('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)', [
     userId,
     hashToken(raw),
     now + RESET_TOKEN_TTL_MS,
@@ -96,15 +96,15 @@ function createResetToken(userId) {
 }
 
 // Marks every unused token of a user as used (e.g. after a failed delivery).
-function invalidateResetTokens(userId) {
-  db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [Date.now(), userId]);
+async function invalidateResetTokens(userId) {
+  await db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [Date.now(), userId]);
 }
 
 // Returns the token row only if it exists, is unused, and is unexpired
 // (expiry enforced server-side here, not by the client).
-function findValidResetToken(raw) {
+async function findValidResetToken(raw) {
   if (typeof raw !== 'string' || raw.length < 20 || raw.length > 200) return null;
-  const row = db.get('SELECT * FROM password_reset_tokens WHERE token_hash = ?', [hashToken(raw)]);
+  const row = await db.get('SELECT * FROM password_reset_tokens WHERE token_hash = ?', [hashToken(raw)]);
   if (!row || row.used_at || row.expires_at <= Date.now()) return null;
   return row;
 }

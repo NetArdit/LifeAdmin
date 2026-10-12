@@ -41,7 +41,7 @@ test('plan / plan-apply route', async (t) => {
     const res = await c.post('/api/ai/plan/apply', { preview });
     assert.equal(res.status, 201);
     assert.equal(res.data.created, 2);
-    const rows = db.all("SELECT title, due_date, start_time, duration_minutes FROM tasks WHERE notes = '[demo-seed]' OR notes = 'Created from AI weekly plan' ORDER BY start_time");
+    const rows = await db.all("SELECT title, due_date, start_time, duration_minutes FROM tasks WHERE notes = '[demo-seed]' OR notes = 'Created from AI weekly plan' ORDER BY start_time");
     const morning = rows.find((r) => r.title === 'Morning walk');
     const evening = rows.find((r) => r.title === 'Evening walk');
     assert.equal(morning.start_time, '2027-03-10T08:00:00.000Z', 'stored verbatim, not reconstructed from date+HH:MM');
@@ -53,7 +53,7 @@ test('plan / plan-apply route', async (t) => {
 
   await t.test('M2. malformed/missing ISO instants are rejected cleanly, and nothing is partially applied (transaction atomicity)', async () => {
     const c = await newUser();
-    const before = db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'").c;
+    const before = (await db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'")).c;
     const badCases = [
       { placed: [{ label: 'A', startISO: 'not-a-date', endISO: '2027-01-01T09:00:00.000Z' }] },
       { placed: [{ label: 'A', startISO: '2027-01-01T09:00:00.000Z', endISO: '2027-01-01T08:00:00.000Z' }] }, // end before start
@@ -65,12 +65,12 @@ test('plan / plan-apply route', async (t) => {
       const res = await c.post('/api/ai/plan/apply', { preview: { '2027-01-01': day } });
       assert.equal(res.status, 400, JSON.stringify(day));
     }
-    assert.equal(db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'").c, before, 'no task was created by any rejected request');
+    assert.equal((await db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'")).c, before, 'no task was created by any rejected request');
   });
 
   await t.test('M3. transaction atomicity: one bad block in an otherwise-valid multi-block request applies NONE of them', async () => {
     const c = await newUser();
-    const before = db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'").c;
+    const before = (await db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'")).c;
     const preview = {
       '2027-02-01': {
         placed: [
@@ -81,7 +81,7 @@ test('plan / plan-apply route', async (t) => {
     };
     const res = await c.post('/api/ai/plan/apply', { preview });
     assert.equal(res.status, 400);
-    assert.equal(db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'").c, before, 'the valid "Good block" was NOT partially applied');
+    assert.equal((await db.get("SELECT COUNT(*) c FROM tasks WHERE notes = 'Created from AI weekly plan'")).c, before, 'the valid "Good block" was NOT partially applied');
   });
 
   await t.test('/plan/apply requires authentication and only ever creates tasks owned by the caller', async () => {
@@ -94,7 +94,7 @@ test('plan / plan-apply route', async (t) => {
     const me1 = (await c1.get('/api/auth/me')).data.user;
     const applyRes = await c1.post('/api/ai/plan/apply', { preview: { '2027-01-01': { placed: [{ label: 'Owned by c1', startISO: '2027-01-01T09:00:00.000Z', endISO: '2027-01-01T09:30:00.000Z' }] } } });
     assert.equal(applyRes.status, 201);
-    const row = db.get("SELECT owner_id FROM tasks WHERE title = 'Owned by c1'");
+    const row = await db.get("SELECT owner_id FROM tasks WHERE title = 'Owned by c1'");
     assert.equal(row.owner_id, me1.id);
     const listedByC2 = (await c2.get('/api/tasks')).data.tasks.some((t2) => t2.title === 'Owned by c1');
     assert.equal(listedByC2, false, 'the other user cannot see the applied task');
@@ -107,7 +107,7 @@ test('plan / plan-apply route', async (t) => {
     const r2 = await c.post('/api/ai/plan/apply', { preview });
     assert.equal(r1.status, 201);
     assert.equal(r2.status, 201);
-    const count = db.get("SELECT COUNT(*) c FROM tasks WHERE title = 'Repeatable'").c;
+    const count = (await db.get("SELECT COUNT(*) c FROM tasks WHERE title = 'Repeatable'")).c;
     assert.equal(count, 2, 'documented, pre-existing, out-of-scope behaviour — not changed by this phase (see report)');
   });
 

@@ -29,12 +29,12 @@ function forbidden(message) {
 // the target must actually belong to that family — otherwise a task (and its
 // title/description, potentially sensitive) becomes visible to an arbitrary
 // user id with no relationship to the assigner.
-function validateAssignment(assignedTo, familyId) {
+async function validateAssignment(assignedTo, familyId) {
   if (assignedTo == null) return;
   if (!familyId) {
     throw new ValidationError('Assigning a task requires selecting a circle.', { assignedTo: 'Select a circle to assign this task within.' });
   }
-  if (!getMembership(assignedTo, familyId)) {
+  if (!await getMembership(assignedTo, familyId)) {
     throw new ValidationError('The assignee must be a member of the selected circle.', { assignedTo: 'Not a member of this circle.' });
   }
 }
@@ -110,7 +110,7 @@ router.get(
     }
     sql += ' ORDER BY (t.due_date IS NULL), t.due_date ASC, t.start_time ASC';
 
-    const rows = db.all(sql, [...params, ...extra]);
+    const rows = await db.all(sql, [...params, ...extra]);
     res.json({ tasks: rows.map(mapTask) });
   })
 );
@@ -119,7 +119,7 @@ router.get(
   '/:id',
   asyncRoute(async (req, res) => {
     const { clause, params } = taskWhereClause(req.user.id);
-    const t = db.get(
+    const t = await db.get(
       `SELECT t.*, ou.first_name owner_first_name, ou.last_name owner_last_name,
               au.first_name assignee_first_name, au.last_name assignee_last_name
        FROM tasks t
@@ -129,7 +129,7 @@ router.get(
       [req.params.id, ...params]
     );
     if (!t) return res.status(404).json({ error: 'Task not found.' });
-    const comments = db.all(
+    const comments = await db.all(
       `SELECT c.*, u.first_name, u.last_name FROM task_comments c JOIN users u ON u.id = c.user_id
        WHERE c.task_id = ? ORDER BY c.created_at ASC`,
       [t.id]
@@ -158,13 +158,13 @@ router.post(
     let familyId = null;
     let visibility = 'private';
     if (b.familyId) {
-      requireMembership(req.user.id, b.familyId);
+      await requireMembership(req.user.id, b.familyId);
       familyId = b.familyId;
       visibility = b.visibility === 'family' ? 'family' : 'private';
     }
-    validateAssignment(b.assignedTo, familyId);
+    await validateAssignment(b.assignedTo, familyId);
 
-    const result = db.run(
+    const result = await db.run(
       `INSERT INTO tasks (owner_id, family_id, assigned_to, visibility, title, description, category, status,
         priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_minutes_before, notes)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -191,7 +191,7 @@ router.post(
     // Hardening 1 / F-04: only a family-visible task may appear on the family's
     // shared surfaces (feed, dashboard feed, Timeline). A private task's activity
     // stays with its author (family_id NULL) even when the task sits inside a family.
-    logActivity({
+    await logActivity({
       userId: req.user.id,
       familyId: sharedFamilyIdForTask({ visibility, family_id: familyId }),
       type: 'task_created',
@@ -200,7 +200,7 @@ router.post(
     });
 
     if (familyId && visibility === 'family') {
-      notifyFamily(familyId, req.user.id, {
+      await notifyFamily(familyId, req.user.id, {
         type: 'family',
         title: 'New circle task',
         body: b.title.trim(),
@@ -208,7 +208,7 @@ router.post(
       });
     }
     if (b.assignedTo && b.assignedTo !== req.user.id) {
-      notifyUser(b.assignedTo, {
+      await notifyUser(b.assignedTo, {
         type: 'task',
         title: 'A task was assigned to you',
         body: b.title.trim(),
@@ -216,7 +216,7 @@ router.post(
       });
     }
 
-    const t = db.get('SELECT * FROM tasks WHERE id = ?', [result.lastInsertRowid]);
+    const t = await db.get('SELECT * FROM tasks WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({ task: mapTask(t) });
   })
 );
@@ -226,7 +226,7 @@ router.post(
 // Stops once recurrenceUntil is passed, or if there's no due date to advance
 // from (recurrence without a due date has nothing to compute the next
 // occurrence relative to).
-function spawnNextOccurrence(t) {
+async function spawnNextOccurrence(t) {
   if (!t.recurrence || !t.due_date) return null;
   const next = nextRecurrenceDate(t.due_date, t.recurrence);
   if (!next) return null;
@@ -235,7 +235,7 @@ function spawnNextOccurrence(t) {
   // Completing a task, reopening it and completing it again must not create a
   // second copy of the next occurrence: if that occurrence already exists and
   // is still open, there is nothing to create.
-  const already = db.get(
+  const already = await db.get(
     `SELECT id FROM tasks WHERE owner_id = ? AND title = ? AND recurrence = ? AND due_date = ?
        AND family_id IS ? AND id != ? AND status NOT IN ('completed','cancelled')`,
     [t.owner_id, t.title, t.recurrence, next, t.family_id, t.id]
@@ -250,7 +250,7 @@ function spawnNextOccurrence(t) {
     nextStartTime = d.toISOString();
   }
 
-  const result = db.run(
+  const result = await db.run(
     `INSERT INTO tasks (owner_id, family_id, assigned_to, visibility, title, description, category, status,
       priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_minutes_before, notes)
      VALUES (?,?,?,?,?,?,?,'todo',?,?,?,?,?,?,?,?)`,
@@ -278,9 +278,9 @@ function spawnNextOccurrence(t) {
 // Loads a task by URL id only if the requester can CURRENTLY access it; a task
 // that does not exist and one the requester may not open are the same 404, so a
 // former member cannot use a remembered id to probe or mutate family tasks.
-function loadAccessibleTask(req) {
-  const t = db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
-  return t && canAccessTask(req.user.id, t) ? t : null;
+async function loadAccessibleTask(req) {
+  const t = await db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
+  return t && await canAccessTask(req.user.id, t) ? t : null;
 }
 
 const normId = (v) => (v == null ? null : Number(v));
@@ -288,7 +288,7 @@ const normId = (v) => (v == null ? null : Number(v));
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
-    const t = loadAccessibleTask(req);
+    const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
 
     const b = req.body || {};
@@ -316,7 +316,7 @@ router.patch(
         // Sharing with a family needs a family the owner currently belongs to.
         const target = t.family_id != null ? t.family_id : b.familyId;
         if (!Number.isInteger(target)) throw new ValidationError('Choose a circle to share this task with.', { familyId: 'Required' });
-        requireMembership(req.user.id, target);
+        await requireMembership(req.user.id, target);
         if (t.family_id == null) {
           fields.push('family_id = ?');
           params.push(target);
@@ -331,7 +331,7 @@ router.patch(
     if (b.assignedTo !== undefined && normId(b.assignedTo) !== normId(t.assigned_to)) {
       if (!isOwner) throw forbidden('Only the task owner can change the assignee.');
       const effectiveFamily = t.family_id != null ? t.family_id : fields.includes('family_id = ?') ? params[fields.indexOf('family_id = ?')] : null;
-      validateAssignment(b.assignedTo, effectiveFamily);
+      await validateAssignment(b.assignedTo, effectiveFamily);
       fields.push('assigned_to = ?');
       params.push(b.assignedTo);
     }
@@ -365,12 +365,12 @@ router.patch(
     if (!fields.length) return res.json({ task: mapTask(t) });
 
     fields.push("updated_at = datetime('now')");
-    db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, [...params, t.id]);
+    await db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, [...params, t.id]);
 
-    const updated = db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
+    const updated = await db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
     if (b.status === 'completed' && t.status !== 'completed') {
       const sharedFamilyId = sharedFamilyIdForTask(updated);
-      logActivity({
+      await logActivity({
         userId: req.user.id,
         familyId: sharedFamilyId,
         type: 'task_completed',
@@ -378,16 +378,16 @@ router.patch(
         link: `#/tasks/${t.id}`,
       });
       if (sharedFamilyId) {
-        notifyFamily(sharedFamilyId, req.user.id, {
+        await notifyFamily(sharedFamilyId, req.user.id, {
           type: 'task',
           title: 'Task completed',
           body: updated.title,
           link: `#/tasks/${t.id}`,
         });
       }
-      const nextId = spawnNextOccurrence(updated);
+      const nextId = await spawnNextOccurrence(updated);
       if (nextId) {
-        logActivity({
+        await logActivity({
           userId: req.user.id,
           familyId: sharedFamilyId,
           type: 'task_created',
@@ -403,7 +403,7 @@ router.patch(
 router.post(
   '/:id/postpone',
   asyncRoute(async (req, res) => {
-    const t = loadAccessibleTask(req);
+    const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
     // Postponing moves a task later by a whole number of days (1 to 365).
     const requested = Math.trunc(Number(req.body && req.body.days)) || 1;
@@ -420,8 +420,8 @@ router.post(
         newStart = d.toISOString();
       }
     }
-    db.run("UPDATE tasks SET due_date = ?, start_time = ?, updated_at = datetime('now') WHERE id = ?", [newDue, newStart, t.id]);
-    const updated = db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
+    await db.run("UPDATE tasks SET due_date = ?, start_time = ?, updated_at = datetime('now') WHERE id = ?", [newDue, newStart, t.id]);
+    const updated = await db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
     res.json({ task: mapTask(updated) });
   })
 );
@@ -431,10 +431,10 @@ router.delete(
   asyncRoute(async (req, res) => {
     // Deleting stays owner-only, with one narrow exception: the FAMILY owner may delete
     // a family task whose owner has left the family (otherwise it could never be removed).
-    const t = db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
-    const allowed = t && ((t.owner_id === req.user.id && canAccessTask(req.user.id, t)) || canDeleteOrphanedTask(req.user.id, t));
+    const t = await db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
+    const allowed = t && ((t.owner_id === req.user.id && await canAccessTask(req.user.id, t)) || await canDeleteOrphanedTask(req.user.id, t));
     if (!allowed) return res.status(404).json({ error: 'Task not found.' });
-    db.run('DELETE FROM tasks WHERE id = ?', [t.id]);
+    await db.run('DELETE FROM tasks WHERE id = ?', [t.id]);
     res.json({ ok: true });
   })
 );
@@ -443,12 +443,12 @@ router.delete(
 router.post(
   '/:id/comments',
   asyncRoute(async (req, res) => {
-    const t = loadAccessibleTask(req);
+    const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
     const body = req.body && req.body.body;
     if (!isNonEmpty(body)) throw new ValidationError('Comment cannot be empty.');
 
-    const result = db.run('INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)', [
+    const result = await db.run('INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)', [
       t.id,
       req.user.id,
       body.trim(),
@@ -459,7 +459,7 @@ router.post(
     // only the people who can actually open it — its owner and its assignee — and
     // writes nothing to the family's shared feed.
     const sharedFamilyId = sharedFamilyIdForTask(t);
-    logActivity({
+    await logActivity({
       userId: req.user.id,
       familyId: sharedFamilyId,
       type: 'comment',
@@ -467,7 +467,7 @@ router.post(
       link: `#/tasks/${t.id}`,
     });
     if (sharedFamilyId) {
-      notifyFamily(sharedFamilyId, req.user.id, {
+      await notifyFamily(sharedFamilyId, req.user.id, {
         type: 'comment',
         title: `${req.user.first_name} commented on "${t.title}"`,
         body: body.trim(),
@@ -475,11 +475,12 @@ router.post(
       });
     } else {
       // Only people who can CURRENTLY open the task are told about it.
-      const recipients = new Set(
-        [t.owner_id, t.assigned_to].filter((id) => id && id !== req.user.id && canAccessTask(id, t))
-      );
+      const recipients = new Set();
+      for (const id of [t.owner_id, t.assigned_to]) {
+        if (id && id !== req.user.id && (await canAccessTask(id, t))) recipients.add(id);
+      }
       for (const userId of recipients) {
-        notifyUser(userId, {
+        await notifyUser(userId, {
           type: 'comment',
           title: `New comment on "${t.title}"`,
           body: body.trim(),
@@ -488,7 +489,7 @@ router.post(
       }
     }
 
-    const c = db.get('SELECT * FROM task_comments WHERE id = ?', [result.lastInsertRowid]);
+    const c = await db.get('SELECT * FROM task_comments WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({
       comment: {
         id: c.id,

@@ -23,11 +23,11 @@ router.get(
     // History is never deleted; rows that link to a task the reader can no longer
     // access are simply not returned (and not counted). See lib/linkedTaskFilter.js.
     const shows = showsLinkedTaskSql('n.link', req.user.id);
-    const rows = db.all(
+    const rows = await db.all(
       `SELECT n.* FROM notifications n WHERE n.user_id = ? AND ${shows} ORDER BY n.created_at DESC LIMIT 100`,
       [req.user.id]
     );
-    const unread = db.get(
+    const unread = await db.get(
       `SELECT COUNT(*) c FROM notifications n WHERE n.user_id = ? AND n.read_at IS NULL AND ${shows}`,
       [req.user.id]
     );
@@ -38,7 +38,7 @@ router.get(
 router.post(
   '/:id/read',
   asyncRoute(async (req, res) => {
-    db.run("UPDATE notifications SET read_at = datetime('now') WHERE id = ? AND user_id = ?", [
+    await db.run("UPDATE notifications SET read_at = datetime('now') WHERE id = ? AND user_id = ?", [
       req.params.id,
       req.user.id,
     ]);
@@ -49,7 +49,7 @@ router.post(
 router.post(
   '/read-all',
   asyncRoute(async (req, res) => {
-    db.run("UPDATE notifications SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL", [req.user.id]);
+    await db.run("UPDATE notifications SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL", [req.user.id]);
     res.json({ ok: true });
   })
 );

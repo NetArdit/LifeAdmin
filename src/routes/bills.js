@@ -54,7 +54,7 @@ function nextDueDate(dueDate, recurrence) {
 router.get(
   '/',
   asyncRoute(async (req, res) => {
-    const rows = db.all('SELECT * FROM bills WHERE owner_id = ? ORDER BY due_date ASC', [req.user.id]);
+    const rows = await db.all('SELECT * FROM bills WHERE owner_id = ? ORDER BY due_date ASC', [req.user.id]);
     res.json({ bills: rows.map(mapBill) });
   })
 );
@@ -63,7 +63,7 @@ router.get(
 router.get(
   '/stats',
   asyncRoute(async (req, res) => {
-    const rows = db.all('SELECT * FROM bills WHERE owner_id = ?', [req.user.id]);
+    const rows = await db.all('SELECT * FROM bills WHERE owner_id = ?', [req.user.id]);
     const today = todayISO();
     const unpaid = rows.filter((b) => b.status === 'unpaid');
     const overdue = unpaid.filter((b) => b.due_date < today);
@@ -95,7 +95,7 @@ router.get(
     // paid_at is stored in UTC and read here in the server's timezone, so the
     // month matches todayISO(). One total per currency: amounts in different currencies are never added
     // together.
-    const paidThisMonth = db.all(
+    const paidThisMonth = await db.all(
       `SELECT b.currency AS currency, SUM(p.amount) AS total, COUNT(*) AS count
        FROM bill_payments p JOIN bills b ON b.id = p.bill_id
        WHERE b.owner_id = ? AND substr(datetime(p.paid_at, 'localtime'), 1, 7) = ?
@@ -125,7 +125,7 @@ router.get(
 router.post(
   '/insights',
   asyncRoute(async (req, res) => {
-    const rows = db.all('SELECT * FROM bills WHERE owner_id = ?', [req.user.id]);
+    const rows = await db.all('SELECT * FROM bills WHERE owner_id = ?', [req.user.id]);
     if (!rows.length) return res.json({ ok: true, data: { insights: ['Add a few bills to unlock spending insights.'] } });
     if (ai.userAiDisabled(req.user)) return res.json(ai.AI_DISABLED_BY_USER);
 
@@ -154,11 +154,11 @@ router.post(
     let familyId = null;
     if (b.familyId !== undefined && b.familyId !== null) {
       if (!Number.isInteger(b.familyId) || b.familyId < 1) throw new ValidationError('Invalid circle.', { familyId: 'Invalid' });
-      requireMembership(req.user.id, b.familyId);
+      await requireMembership(req.user.id, b.familyId);
       familyId = b.familyId;
     }
 
-    const result = db.run(
+    const result = await db.run(
       `INSERT INTO bills (owner_id, family_id, name, category, amount, currency, due_date, recurrence, notes)
        VALUES (?,?,?,?,?,?,?,?,?)`,
       [
@@ -173,7 +173,7 @@ router.post(
         b.notes || null,
       ]
     );
-    const bill = db.get('SELECT * FROM bills WHERE id = ?', [result.lastInsertRowid]);
+    const bill = await db.get('SELECT * FROM bills WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({ bill: mapBill(bill) });
   })
 );
@@ -181,7 +181,7 @@ router.post(
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
-    const bill = db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+    const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
     const b = req.body || {};
     // Hardening 1 / F-01: a bill's family association is fixed when it is created
@@ -207,28 +207,28 @@ router.patch(
     }
     if (!fields.length) return res.json({ bill: mapBill(bill) });
     fields.push("updated_at = datetime('now')");
-    db.run(`UPDATE bills SET ${fields.join(', ')} WHERE id = ?`, [...params, bill.id]);
-    res.json({ bill: mapBill(db.get('SELECT * FROM bills WHERE id = ?', [bill.id])) });
+    await db.run(`UPDATE bills SET ${fields.join(', ')} WHERE id = ?`, [...params, bill.id]);
+    res.json({ bill: mapBill(await db.get('SELECT * FROM bills WHERE id = ?', [bill.id])) });
   })
 );
 
 router.post(
   '/:id/pay',
   asyncRoute(async (req, res) => {
-    const bill = db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+    const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
 
-    db.run('INSERT INTO bill_payments (bill_id, amount, note) VALUES (?, ?, ?)', [
+    await db.run('INSERT INTO bill_payments (bill_id, amount, note) VALUES (?, ?, ?)', [
       bill.id,
       bill.amount,
       (req.body && req.body.note) || null,
     ]);
 
     if (bill.recurrence === 'none') {
-      db.run("UPDATE bills SET status = 'paid', updated_at = datetime('now') WHERE id = ?", [bill.id]);
+      await db.run("UPDATE bills SET status = 'paid', updated_at = datetime('now') WHERE id = ?", [bill.id]);
     } else {
       const next = nextDueDate(bill.due_date, bill.recurrence);
-      db.run("UPDATE bills SET status = 'unpaid', due_date = ?, updated_at = datetime('now') WHERE id = ?", [
+      await db.run("UPDATE bills SET status = 'unpaid', due_date = ?, updated_at = datetime('now') WHERE id = ?", [
         next,
         bill.id,
       ]);
@@ -236,8 +236,8 @@ router.post(
 
     // Side effects go to the family only while the payer is STILL a member of it
     // (covers bills stored before the F-01 fix and members who have since left).
-    const sharedFamilyId = bill.family_id && getMembership(req.user.id, bill.family_id) ? bill.family_id : null;
-    logActivity({
+    const sharedFamilyId = bill.family_id && await getMembership(req.user.id, bill.family_id) ? bill.family_id : null;
+    await logActivity({
       userId: req.user.id,
       familyId: sharedFamilyId,
       type: 'bill_paid',
@@ -245,23 +245,23 @@ router.post(
       link: '#/billsense',
     });
     if (sharedFamilyId) {
-      notifyFamily(sharedFamilyId, req.user.id, {
+      await notifyFamily(sharedFamilyId, req.user.id, {
         type: 'bill',
         title: `${bill.name} was marked as paid`,
         link: '#/billsense',
       });
     }
 
-    res.json({ bill: mapBill(db.get('SELECT * FROM bills WHERE id = ?', [bill.id])) });
+    res.json({ bill: mapBill(await db.get('SELECT * FROM bills WHERE id = ?', [bill.id])) });
   })
 );
 
 router.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    const bill = db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+    const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
-    db.run('DELETE FROM bills WHERE id = ?', [bill.id]);
+    await db.run('DELETE FROM bills WHERE id = ?', [bill.id]);
     res.json({ ok: true });
   })
 );

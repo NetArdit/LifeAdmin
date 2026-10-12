@@ -39,7 +39,7 @@ router.post(
       const dayActivities = plan.activities.filter((a) => !a.days.length || a.days.includes(dow));
       if (!dayActivities.length) continue;
 
-      const existingTasks = db.all(
+      const existingTasks = await db.all(
         `SELECT start_time, duration_minutes FROM tasks WHERE owner_id = ? AND due_date = ? AND start_time IS NOT NULL AND duration_minutes IS NOT NULL`,
         [req.user.id, date]
       );
@@ -104,9 +104,9 @@ router.post(
     }
 
     let created = 0;
-    db.tx(() => {
+    await db.tx(async () => {
       for (const b of blocks) {
-        db.run(
+        await db.run(
           `INSERT INTO tasks (owner_id, title, category, status, priority, due_date, start_time, duration_minutes, notes)
            VALUES (?,?,?,?,?,?,?,?,?)`,
           [req.user.id, b.label, 'plan', 'todo', 'medium', b.date, b.startISO, b.duration, 'Created from AI weekly plan']
@@ -127,19 +127,19 @@ router.post(
     const today = todayISO();
     const weekAgo = addDays(today, -7);
     const context = {
-      completedTasksLast7Days: db.get(
+      completedTasksLast7Days: (await db.get(
         `SELECT COUNT(*) c FROM tasks WHERE owner_id = ? AND status = 'completed' AND completed_at >= ?`,
         [userId, weekAgo]
-      ).c,
-      overdueTasks: db.get(`SELECT COUNT(*) c FROM tasks WHERE owner_id = ? AND due_date < ? AND status NOT IN ('completed','cancelled')`, [userId, today]).c,
-      billsUnpaid: db.get(`SELECT COUNT(*) c FROM bills WHERE owner_id = ? AND status = 'unpaid'`, [userId]).c,
-      openDecisions: db.get(`SELECT COUNT(*) c FROM decisions WHERE owner_id = ? AND status = 'open'`, [userId]).c,
-      goalsWithNoRecentProgress: db.all(
+      )).c,
+      overdueTasks: (await db.get(`SELECT COUNT(*) c FROM tasks WHERE owner_id = ? AND due_date < ? AND status NOT IN ('completed','cancelled')`, [userId, today])).c,
+      billsUnpaid: (await db.get(`SELECT COUNT(*) c FROM bills WHERE owner_id = ? AND status = 'unpaid'`, [userId])).c,
+      openDecisions: (await db.get(`SELECT COUNT(*) c FROM decisions WHERE owner_id = ? AND status = 'open'`, [userId])).c,
+      goalsWithNoRecentProgress: (await db.all(
         `SELECT title FROM goals WHERE owner_id = ? AND status = 'active' AND updated_at < ?`,
         [userId, weekAgo]
-      ).map((g) => g.title),
-      ecoLogsLast7Days: db.get(`SELECT COUNT(*) c FROM eco_logs WHERE owner_id = ? AND logged_at >= ?`, [userId, weekAgo]).c,
-      familyCount: getUserFamilyIds(userId).length,
+      )).map((g) => g.title),
+      ecoLogsLast7Days: (await db.get(`SELECT COUNT(*) c FROM eco_logs WHERE owner_id = ? AND logged_at >= ?`, [userId, weekAgo])).c,
+      familyCount: (await getUserFamilyIds(userId)).length,
     };
     const result = await ai.weeklyReview(context);
     res.json(result);
@@ -147,7 +147,7 @@ router.post(
 );
 
 // --- Assistant chat with context selection (spec §22-23) --------------------
-function buildContext(userId, message) {
+async function buildContext(userId, message) {
   const lower = message.toLowerCase();
   const today = todayISO();
   const context = {};
@@ -160,32 +160,32 @@ function buildContext(userId, message) {
   // Always include a compact snapshot so the assistant has baseline grounding.
   context.today = today;
   context.openCounts = {
-    tasks: db.get(`SELECT COUNT(*) c FROM tasks WHERE owner_id = ? AND status NOT IN ('completed','cancelled')`, [userId]).c,
-    bills: db.get(`SELECT COUNT(*) c FROM bills WHERE owner_id = ? AND status = 'unpaid'`, [userId]).c,
+    tasks: (await db.get(`SELECT COUNT(*) c FROM tasks WHERE owner_id = ? AND status NOT IN ('completed','cancelled')`, [userId])).c,
+    bills: (await db.get(`SELECT COUNT(*) c FROM bills WHERE owner_id = ? AND status = 'unpaid'`, [userId])).c,
   };
 
   if (wantsSchedule || Object.keys(context).length <= 2) {
-    context.upcomingTasks = db
+    context.upcomingTasks = await db
       .all(
         `SELECT t.title, t.due_date, t.priority, t.status FROM tasks t WHERE t.owner_id = ? AND ${taskAccessSql('t', userId)} AND t.status NOT IN ('completed','cancelled') AND (t.due_date IS NULL OR t.due_date >= ?) ORDER BY t.due_date ASC LIMIT 12`,
         [userId, today]
       );
   }
   if (wantsBills) {
-    context.bills = db.all(`SELECT name, amount, currency, due_date, status FROM bills WHERE owner_id = ? AND status = 'unpaid' ORDER BY due_date ASC LIMIT 12`, [userId]);
+    context.bills = await db.all(`SELECT name, amount, currency, due_date, status FROM bills WHERE owner_id = ? AND status = 'unpaid' ORDER BY due_date ASC LIMIT 12`, [userId]);
   }
   if (wantsFamily) {
-    const familyIds = getUserFamilyIds(userId);
+    const familyIds = await getUserFamilyIds(userId);
     if (familyIds.length) {
       const placeholders = familyIds.map(() => '?').join(',');
-      context.familyTasks = db.all(
+      context.familyTasks = await db.all(
         `SELECT title, due_date, status FROM tasks WHERE visibility='family' AND family_id IN (${placeholders}) AND status NOT IN ('completed','cancelled') LIMIT 10`,
         familyIds
       );
     }
   }
   if (wantsGoals) {
-    context.goals = db.all(`SELECT title, progress, target_date FROM goals WHERE owner_id = ? AND status = 'active' LIMIT 8`, [userId]);
+    context.goals = await db.all(`SELECT title, progress, target_date FROM goals WHERE owner_id = ? AND status = 'active' LIMIT 8`, [userId]);
   }
   return context;
 }
@@ -193,7 +193,7 @@ function buildContext(userId, message) {
 router.get(
   '/chat/history',
   asyncRoute(async (req, res) => {
-    let conv = db.get('SELECT * FROM ai_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1', [req.user.id]);
+    let conv = await db.get('SELECT * FROM ai_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1', [req.user.id]);
     if (!conv) return res.json({ conversationId: null, messages: [] });
     // Message-window fix (Daily Product Quality phase): same bug as
     // src/routes/chat.js's family messages endpoint, found by the same
@@ -208,7 +208,7 @@ router.get(
     // handler's `history` query) — matched here for consistency rather than
     // introducing a second technique (e.g. a SQL subquery) for the same
     // problem.
-    const messages = db.all('SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 40', [conv.id]).reverse();
+    const messages = (await db.all('SELECT * FROM ai_messages WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 40', [conv.id])).reverse();
     res.json({ conversationId: conv.id, messages: messages.map((m) => ({ role: m.role, content: m.content, createdAt: m.created_at })) });
   })
 );
@@ -220,25 +220,25 @@ router.post(
     if (!isNonEmpty(message)) throw new ValidationError('Message cannot be empty.');
     if (ai.userAiDisabled(req.user)) return res.json(ai.AI_DISABLED_BY_USER);
 
-    let conv = db.get('SELECT * FROM ai_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1', [req.user.id]);
+    let conv = await db.get('SELECT * FROM ai_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1', [req.user.id]);
     if (!conv) {
-      const result = db.run('INSERT INTO ai_conversations (user_id, title) VALUES (?, ?)', [req.user.id, message.slice(0, 60)]);
-      conv = db.get('SELECT * FROM ai_conversations WHERE id = ?', [result.lastInsertRowid]);
+      const result = await db.run('INSERT INTO ai_conversations (user_id, title) VALUES (?, ?)', [req.user.id, message.slice(0, 60)]);
+      conv = await db.get('SELECT * FROM ai_conversations WHERE id = ?', [result.lastInsertRowid]);
     }
 
     // Keep only a short recent history to control token usage (spec §23).
-    const history = db
-      .all('SELECT role, content FROM ai_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 6', [conv.id])
+    const history = (await db
+      .all('SELECT role, content FROM ai_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 6', [conv.id]))
       .reverse();
 
-    const context = buildContext(req.user.id, message);
+    const context = await buildContext(req.user.id, message);
     const result = await ai.assistantChat({ message, context, history });
 
-    db.run("INSERT INTO ai_messages (conversation_id, role, content) VALUES (?, 'user', ?)", [conv.id, message]);
+    await db.run("INSERT INTO ai_messages (conversation_id, role, content) VALUES (?, 'user', ?)", [conv.id, message]);
     if (result.ok) {
-      db.run("INSERT INTO ai_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)", [conv.id, result.data.reply]);
+      await db.run("INSERT INTO ai_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)", [conv.id, result.data.reply]);
     }
-    db.run("UPDATE ai_conversations SET updated_at = datetime('now') WHERE id = ?", [conv.id]);
+    await db.run("UPDATE ai_conversations SET updated_at = datetime('now') WHERE id = ?", [conv.id]);
 
     res.json(result);
   })

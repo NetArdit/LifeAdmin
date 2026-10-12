@@ -9,13 +9,13 @@ const { computeProgress } = require('../lib/goalProgress');
 
 const DEMO_TAG = '[demo-seed]';
 
-function seedDemoForUser(userId) {
-  const user = db.get('SELECT * FROM users WHERE id = ?', [userId]);
+async function seedDemoForUser(userId) {
+  const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
   if (!user) throw new Error('User not found');
   const today = todayISO();
 
   // Family
-  let family = db.get(
+  let family = await db.get(
     `SELECT f.* FROM families f JOIN family_members fm ON fm.family_id = f.id WHERE fm.user_id = ? LIMIT 1`,
     [userId]
   );
@@ -25,11 +25,11 @@ function seedDemoForUser(userId) {
     let code;
     do {
       code = generateInviteCode();
-    } while (db.get('SELECT id FROM families WHERE invite_code = ?', [code]));
-    const r = db.run('INSERT INTO families (name, invite_code, owner_id) VALUES (?, ?, ?)', ['The Demo Circle', code, userId]);
-    family = db.get('SELECT * FROM families WHERE id = ?', [r.lastInsertRowid]);
-    db.run("INSERT INTO family_members (family_id, user_id, role) VALUES (?, ?, 'owner')", [family.id, userId]);
-    db.run(
+    } while (await db.get('SELECT id FROM families WHERE invite_code = ?', [code]));
+    const r = await db.run('INSERT INTO families (name, invite_code, owner_id) VALUES (?, ?, ?)', ['The Demo Circle', code, userId]);
+    family = await db.get('SELECT * FROM families WHERE id = ?', [r.lastInsertRowid]);
+    await db.run("INSERT INTO family_members (family_id, user_id, role) VALUES (?, ?, 'owner')", [family.id, userId]);
+    await db.run(
       `INSERT INTO family_members (family_id, phone, display_name, role) VALUES (?, ?, ?, 'member')`,
       [family.id, '+38344000111', 'Alex (invited)']
     );
@@ -48,21 +48,21 @@ function seedDemoForUser(userId) {
   ];
   const taskIds = [];
   for (const t of tasks) {
-    const r = db.run(
+    const r = await db.run(
       `INSERT INTO tasks (owner_id, family_id, visibility, title, category, status, priority, due_date, start_time, duration_minutes, notes)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [userId, t.visibility === 'family' ? family.id : null, t.visibility, t.title, t.category, t.status, t.priority, t.dueDate, t.startTime || null, t.durationMinutes || null, DEMO_TAG]
     );
     taskIds.push(r.lastInsertRowid);
-    db.run(`INSERT INTO activity_log (user_id, family_id, type, summary, link) VALUES (?, ?, 'task_created', ?, ?)`, [
+    await db.run(`INSERT INTO activity_log (user_id, family_id, type, summary, link) VALUES (?, ?, 'task_created', ?, ?)`, [
       userId,
       t.visibility === 'family' ? family.id : null,
       `${user.first_name} created "${t.title}"`,
       `#/tasks/${r.lastInsertRowid}`,
     ]);
   }
-  db.run(`INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)`, [taskIds[1], userId, "Don't forget to invite grandma."]);
-  db.run(`INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)`, [taskIds[5], userId, "I'll go after work, add anything you need to the shopping list."]);
+  await db.run(`INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)`, [taskIds[1], userId, "Don't forget to invite grandma."]);
+  await db.run(`INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)`, [taskIds[5], userId, "I'll go after work, add anything you need to the shopping list."]);
 
   // Chat messages
   const chatLines = [
@@ -72,7 +72,7 @@ function seedDemoForUser(userId) {
     'Can we plan the weekend trip this week?',
   ];
   for (const line of chatLines) {
-    db.run('INSERT INTO messages (family_id, user_id, body) VALUES (?, ?, ?)', [family.id, userId, line]);
+    await db.run('INSERT INTO messages (family_id, user_id, body) VALUES (?, ?, ?)', [family.id, userId, line]);
   }
 
   // Shopping list
@@ -82,7 +82,7 @@ function seedDemoForUser(userId) {
     { name: 'Cereal', quantity: null },
   ];
   for (const item of shoppingItems) {
-    db.run('INSERT INTO shopping_items (family_id, name, quantity, added_by) VALUES (?,?,?,?)', [family.id, item.name, item.quantity, userId]);
+    await db.run('INSERT INTO shopping_items (family_id, name, quantity, added_by) VALUES (?,?,?,?)', [family.id, item.name, item.quantity, userId]);
   }
 
   // Bills
@@ -95,25 +95,25 @@ function seedDemoForUser(userId) {
     { name: 'Car insurance', category: 'insurance', amount: 240, dueDate: addDays(today, 40), recurrence: 'yearly' },
   ];
   for (const b of bills) {
-    db.run(
+    await db.run(
       `INSERT INTO bills (owner_id, name, category, amount, currency, due_date, recurrence, notes) VALUES (?,?,?,?,?,?,?,?)`,
       [userId, b.name, b.category, b.amount, 'EUR', b.dueDate, b.recurrence, DEMO_TAG]
     );
   }
 
   // Decision
-  const decision = db.run('INSERT INTO decisions (owner_id, question) VALUES (?, ?)', [userId, 'Should I buy a new laptop or repair my current one?']);
-  const critCost = db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Cost', 5]);
-  const critLongevity = db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Long-term value', 4]);
-  const critConv = db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Convenience', 3]);
-  db.run('INSERT INTO decision_options (decision_id, name, pros, cons, scores) VALUES (?,?,?,?,?)', [
+  const decision = await db.run('INSERT INTO decisions (owner_id, question) VALUES (?, ?)', [userId, 'Should I buy a new laptop or repair my current one?']);
+  const critCost = await db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Cost', 5]);
+  const critLongevity = await db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Long-term value', 4]);
+  const critConv = await db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [decision.lastInsertRowid, 'Convenience', 3]);
+  await db.run('INSERT INTO decision_options (decision_id, name, pros, cons, scores) VALUES (?,?,?,?,?)', [
     decision.lastInsertRowid,
     'Repair current laptop',
     JSON.stringify(['Cheaper now', 'No data migration needed']),
     JSON.stringify(['Still old hardware', 'May break again soon']),
     JSON.stringify({ [critCost.lastInsertRowid]: 5, [critLongevity.lastInsertRowid]: 2, [critConv.lastInsertRowid]: 4 }),
   ]);
-  db.run('INSERT INTO decision_options (decision_id, name, pros, cons, scores) VALUES (?,?,?,?,?)', [
+  await db.run('INSERT INTO decision_options (decision_id, name, pros, cons, scores) VALUES (?,?,?,?,?)', [
     decision.lastInsertRowid,
     'Buy new laptop',
     JSON.stringify(['Faster, reliable for years', 'Better for work']),
@@ -126,7 +126,7 @@ function seedDemoForUser(userId) {
   // never hand-picked, so seeded goals can't drift out of sync with their
   // own milestones (Batch 7C fix — see src/routes/goals.js's
   // recomputeProgress for the equivalent live-data path).
-  const goal1 = db.run('INSERT INTO goals (owner_id, title, description, category, target_date, progress) VALUES (?,?,?,?,?,?)', [
+  const goal1 = await db.run('INSERT INTO goals (owner_id, title, description, category, target_date, progress) VALUES (?,?,?,?,?,?)', [
     userId,
     'Learn JavaScript fundamentals',
     'Complete a structured path to be comfortable building small apps.',
@@ -135,17 +135,17 @@ function seedDemoForUser(userId) {
     0,
   ]);
   const milestones1 = ['Finish basics course', 'Build a to-do app', 'Learn async/await', 'Build a small API'].map((title, i) => ({ title, done: i < 2 }));
-  milestones1.forEach((m, i) => {
-    db.run('INSERT INTO goal_milestones (goal_id, title, done, sort_order) VALUES (?,?,?,?)', [
+  for (const [i, m] of milestones1.entries()) {
+    await db.run('INSERT INTO goal_milestones (goal_id, title, done, sort_order) VALUES (?,?,?,?)', [
       goal1.lastInsertRowid,
       m.title,
       m.done ? 1 : 0,
       i,
     ]);
-  });
-  db.run('UPDATE goals SET progress = ? WHERE id = ?', [computeProgress(milestones1).progress, goal1.lastInsertRowid]);
+  }
+  await db.run('UPDATE goals SET progress = ? WHERE id = ?', [computeProgress(milestones1).progress, goal1.lastInsertRowid]);
 
-  const goal2 = db.run('INSERT INTO goals (owner_id, title, description, category, target_date, progress) VALUES (?,?,?,?,?,?)', [
+  const goal2 = await db.run('INSERT INTO goals (owner_id, title, description, category, target_date, progress) VALUES (?,?,?,?,?,?)', [
     userId,
     'Save €1000 emergency fund',
     null,
@@ -154,10 +154,10 @@ function seedDemoForUser(userId) {
     0,
   ]);
   const milestones2 = ['Reach €250', 'Reach €500', 'Reach €750', 'Reach €1000'].map((title, i) => ({ title, done: i === 0 }));
-  milestones2.forEach((m, i) => {
-    db.run('INSERT INTO goal_milestones (goal_id, title, done, sort_order) VALUES (?,?,?,?)', [goal2.lastInsertRowid, m.title, m.done ? 1 : 0, i]);
-  });
-  db.run('UPDATE goals SET progress = ? WHERE id = ?', [computeProgress(milestones2).progress, goal2.lastInsertRowid]);
+  for (const [i, m] of milestones2.entries()) {
+    await db.run('INSERT INTO goal_milestones (goal_id, title, done, sort_order) VALUES (?,?,?,?)', [goal2.lastInsertRowid, m.title, m.done ? 1 : 0, i]);
+  }
+  await db.run('UPDATE goals SET progress = ? WHERE id = ?', [computeProgress(milestones2).progress, goal2.lastInsertRowid]);
 
   // Eco logs
   const ecoEntries = [
@@ -167,7 +167,7 @@ function seedDemoForUser(userId) {
     { category: 'food', action: 'Meatless dinner' },
   ];
   for (const e of ecoEntries) {
-    db.run('INSERT INTO eco_logs (owner_id, category, action, quantity, unit) VALUES (?,?,?,?,?)', [
+    await db.run('INSERT INTO eco_logs (owner_id, category, action, quantity, unit) VALUES (?,?,?,?,?)', [
       userId,
       e.category,
       e.action,
@@ -183,7 +183,7 @@ function seedDemoForUser(userId) {
     { type: 'family', title: 'Welcome to The Demo Family', link: '#/family' },
   ];
   for (const n of notifs) {
-    db.run('INSERT INTO notifications (user_id, type, title, body, link) VALUES (?,?,?,?,?)', [
+    await db.run('INSERT INTO notifications (user_id, type, title, body, link) VALUES (?,?,?,?,?)', [
       userId,
       n.type,
       n.title,
@@ -195,9 +195,9 @@ function seedDemoForUser(userId) {
   return { familyId: family.id };
 }
 
-function clearDemoForUser(userId) {
-  db.run(`DELETE FROM tasks WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
-  db.run(`DELETE FROM bills WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
+async function clearDemoForUser(userId) {
+  await db.run(`DELETE FROM tasks WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
+  await db.run(`DELETE FROM bills WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
 }
 
 // Standalone CLI usage: `npm run seed` creates a fresh demo account.
@@ -205,19 +205,19 @@ if (require.main === module) {
   (async () => {
     const email = 'demo@lifeadmin.local';
     const phone = '+38344999000';
-    let user = db.get('SELECT * FROM users WHERE email = ?', [email]);
+    let user = await db.get('SELECT * FROM users WHERE email = ?', [email]);
     if (!user) {
       const hash = await hashPassword('demo1234');
-      const r = db.run(
+      const r = await db.run(
         `INSERT INTO users (first_name, last_name, email, phone, password_hash, email_verified, phone_verified) VALUES (?,?,?,?,?,1,1)`,
         ['Demo', 'User', email, phone, hash]
       );
-      user = db.get('SELECT * FROM users WHERE id = ?', [r.lastInsertRowid]);
+      user = await db.get('SELECT * FROM users WHERE id = ?', [r.lastInsertRowid]);
       console.log('Created demo user:', email, '/ password: demo1234');
     } else {
       console.log('Demo user already exists:', email);
     }
-    seedDemoForUser(user.id);
+    await seedDemoForUser(user.id);
     console.log('Demo data seeded.');
   })();
 }

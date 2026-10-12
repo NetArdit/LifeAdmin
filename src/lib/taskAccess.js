@@ -36,18 +36,18 @@ function isFamilyScoped(task) {
   return !!task && task.visibility === 'family' && task.family_id != null;
 }
 
-function isCurrentMember(userId, familyId) {
+async function isCurrentMember(userId, familyId) {
   if (userId == null || familyId == null) return false;
-  return !!db.get('SELECT 1 AS x FROM family_members WHERE user_id = ? AND family_id = ?', [userId, familyId]);
+  return !!await db.get('SELECT 1 AS x FROM family_members WHERE user_id = ? AND family_id = ?', [userId, familyId]);
 }
 
 // JS form (single task row, columns as in the `tasks` table).
-function canAccessTask(userId, task) {
+async function canAccessTask(userId, task) {
   if (!task || userId == null) return false;
-  if (isFamilyScoped(task)) return isCurrentMember(userId, task.family_id);
+  if (isFamilyScoped(task)) return await isCurrentMember(userId, task.family_id);
   if (task.owner_id === userId) return true;
   if (task.assigned_to != null && task.assigned_to === userId) {
-    return task.family_id == null || isCurrentMember(userId, task.family_id);
+    return task.family_id == null || await isCurrentMember(userId, task.family_id);
   }
   return false;
 }
@@ -65,21 +65,21 @@ function taskAccessSql(alias, userId) {
       THEN ${member}
       ELSE (${alias}.owner_id = ${u} OR (${alias}.assigned_to = ${u} AND (${alias}.family_id IS NULL OR ${member})))
     END
-  ), 0)`;
+  ), FALSE)`;
 }
 
 // A family task whose owner is no longer a member of that family. Nobody could
 // otherwise delete it (deletion is owner-only), so it would be stuck forever.
-function isOrphanedFamilyTask(task) {
-  return isFamilyScoped(task) && !isCurrentMember(task.owner_id, task.family_id);
+async function isOrphanedFamilyTask(task) {
+  return isFamilyScoped(task) && !await isCurrentMember(task.owner_id, task.family_id);
 }
 
 // The one narrow family-level capability: the family's OWNER may delete an
 // orphaned family task. Nothing else about task ownership is granted (not
 // visibility, not assignment); ordinary members can already edit family tasks.
-function canDeleteOrphanedTask(userId, task) {
-  if (!isOrphanedFamilyTask(task)) return false;
-  const m = db.get('SELECT role FROM family_members WHERE user_id = ? AND family_id = ?', [userId, task.family_id]);
+async function canDeleteOrphanedTask(userId, task) {
+  if (!await isOrphanedFamilyTask(task)) return false;
+  const m = await db.get('SELECT role FROM family_members WHERE user_id = ? AND family_id = ?', [userId, task.family_id]);
   return !!m && m.role === 'owner';
 }
 

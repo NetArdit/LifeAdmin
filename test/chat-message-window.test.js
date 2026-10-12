@@ -40,7 +40,7 @@ test('chat message window', async (t) => {
     assert.deepEqual(empty.data.messages, []);
 
     for (let i = 0; i < 3; i++) {
-      db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `small-${i}`, tsAt(i)]);
+      await db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `small-${i}`, tsAt(i)]);
     }
     const small = await c.get(`/api/chat/${familyId}/messages`);
     assert.deepEqual(small.data.messages.map((m) => m.body), ['small-0', 'small-1', 'small-2'], 'chronological order preserved for a small chat');
@@ -56,8 +56,8 @@ test('chat message window', async (t) => {
     const TOTAL = 205;
     const rows = [];
     for (let i = 0; i < TOTAL; i++) rows.push([familyId, userId, `msg-${String(i).padStart(4, '0')}`, tsAt(i)]);
-    db.tx(() => {
-      for (const r of rows) db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', r);
+    await db.tx(async () => {
+      for (const r of rows) await db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', r);
     });
 
     const res = await c.get(`/api/chat/${familyId}/messages`);
@@ -75,8 +75,8 @@ test('chat message window', async (t) => {
     const family = await c.post('/api/family', { name: 'Post-Overflow Family' });
     const familyId = family.data.family.id;
     const userId = family.data.family.members[0].userId;
-    db.tx(() => {
-      for (let i = 0; i < 200; i++) db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `old-${i}`, tsAt(i)]);
+    await db.tx(async () => {
+      for (let i = 0; i < 200; i++) await db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `old-${i}`, tsAt(i)]);
     });
 
     const sent = await c.post(`/api/chat/${familyId}/messages`, { body: 'brand new message' });
@@ -93,7 +93,7 @@ test('chat message window', async (t) => {
     const familyId = family.data.family.id;
     const userId = family.data.family.members[0].userId;
     for (let i = 0; i < 10; i++) {
-      db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `s-${i}`, tsAt(i)]);
+      await db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [familyId, userId, `s-${i}`, tsAt(i)]);
     }
     const cutoff = tsAt(5);
     const res = await c.get(`/api/chat/${familyId}/messages?since=${encodeURIComponent(cutoff)}`);
@@ -104,12 +104,12 @@ test('chat message window', async (t) => {
     const c = makeClient(app.base);
     await signUp(c);
     const me = (await c.get('/api/auth/me')).data.user;
-    const conv = db.run("INSERT INTO ai_conversations (user_id, title) VALUES (?, 'Test conversation')", [me.id]);
+    const conv = await db.run("INSERT INTO ai_conversations (user_id, title) VALUES (?, 'Test conversation')", [me.id]);
     const convId = conv.lastInsertRowid;
     const TOTAL = 45;
-    db.tx(() => {
+    await db.tx(async () => {
       for (let i = 0; i < TOTAL; i++) {
-        db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [
+        await db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [
           convId,
           i % 2 === 0 ? 'user' : 'assistant',
           `turn-${String(i).padStart(3, '0')}`,
@@ -132,10 +132,10 @@ test('chat message window', async (t) => {
     const c = makeClient(app.base);
     await signUp(c);
     const me = (await c.get('/api/auth/me')).data.user;
-    const conv = db.run("INSERT INTO ai_conversations (user_id, title) VALUES (?, 'Short')", [me.id]);
+    const conv = await db.run("INSERT INTO ai_conversations (user_id, title) VALUES (?, 'Short')", [me.id]);
     const convId = conv.lastInsertRowid;
-    db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [convId, 'user', 'hello', tsAt(0)]);
-    db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [convId, 'assistant', 'hi there', tsAt(1)]);
+    await db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [convId, 'user', 'hello', tsAt(0)]);
+    await db.run('INSERT INTO ai_messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)', [convId, 'assistant', 'hi there', tsAt(1)]);
 
     const res = await c.get('/api/ai/chat/history');
     assert.deepEqual(res.data.messages.map((m) => m.content), ['hello', 'hi there']);
@@ -145,7 +145,7 @@ test('chat message window', async (t) => {
     const c1 = makeClient(app.base);
     await signUp(c1);
     const f1 = await c1.post('/api/family', { name: 'Family One' });
-    db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [f1.data.family.id, f1.data.family.members[0].userId, 'private to family one', tsAt(0)]);
+    await db.run('INSERT INTO messages (family_id, user_id, body, created_at) VALUES (?,?,?,?)', [f1.data.family.id, f1.data.family.members[0].userId, 'private to family one', tsAt(0)]);
 
     const c2 = makeClient(app.base);
     await signUp(c2);

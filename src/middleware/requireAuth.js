@@ -1,10 +1,10 @@
 const { SESSION_COOKIE, getSessionUser } = require('../lib/auth');
 
 // Attaches req.user (raw DB row) if a valid session cookie is present.
-function attachUser(req, res, next) {
+async function attachUser(req, res, next) {
   const sid = req.cookies ? req.cookies[SESSION_COOKIE] : null;
   req.sessionId = sid || null;
-  req.user = sid ? getSessionUser(sid) : null;
+  req.user = sid ? await getSessionUser(sid) : null;
   next();
 }
 

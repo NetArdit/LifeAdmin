@@ -9,11 +9,11 @@ const router = express.Router();
 router.get(
   '/',
   asyncRoute(async (req, res) => {
-    const familyIds = getUserFamilyIds(req.user.id);
+    const familyIds = await getUserFamilyIds(req.user.id);
     let rows;
     if (familyIds.length) {
       const placeholders = familyIds.map(() => '?').join(',');
-      rows = db.all(
+      rows = await db.all(
         `SELECT a.*, u.first_name, u.last_name FROM activity_log a LEFT JOIN users u ON u.id = a.user_id
          WHERE (a.user_id = ? OR (a.family_id IN (${placeholders}) AND ${HIDE_NON_FAMILY_TASK_ACTIVITY}))
            AND ${showsLinkedTaskSql('a.link', req.user.id)}
@@ -21,7 +21,7 @@ router.get(
         [req.user.id, ...familyIds]
       );
     } else {
-      rows = db.all(
+      rows = await db.all(
         `SELECT a.*, u.first_name, u.last_name FROM activity_log a LEFT JOIN users u ON u.id = a.user_id
          WHERE a.user_id = ? AND ${showsLinkedTaskSql('a.link', req.user.id)} ORDER BY a.created_at DESC LIMIT 150`,
         [req.user.id]

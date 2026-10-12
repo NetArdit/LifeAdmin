@@ -26,7 +26,7 @@ test('hardening 1.5', async (t) => {
   const memberRow = async (viewer, fid, userId) => (await viewer.c.get(`/api/family/${fid}`)).data.family.members.find((m) => m.userId === userId);
   const notifs = async (u) => (await u.c.get('/api/notifications')).data;
   const notifText = async (u) => JSON.stringify((await notifs(u)).notifications);
-  const taskRow = (id) => db.get('SELECT * FROM tasks WHERE id = ?', [id]);
+  const taskRow = async (id) => await db.get('SELECT * FROM tasks WHERE id = ?', [id]);
 
   // A = family X owner, B = member, C = the member who will leave / be removed, D = family Y user.
   async function world() {
@@ -66,11 +66,11 @@ test('hardening 1.5', async (t) => {
       }
 
       const before = {
-        t1: taskRow(T1.id), t2: taskRow(T2.id),
-        comments: db.get('SELECT COUNT(*) c FROM task_comments').c,
-        activity: db.get('SELECT COUNT(*) c FROM activity_log').c,
-        notifsB: db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [B.id]).c,
-        notifsA: db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [A.id]).c,
+        t1: await taskRow(T1.id), t2: await taskRow(T2.id),
+        comments: (await db.get('SELECT COUNT(*) c FROM task_comments')).c,
+        activity: (await db.get('SELECT COUNT(*) c FROM activity_log')).c,
+        notifsB: (await db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [B.id])).c,
+        notifsA: (await db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [A.id])).c,
       };
 
       // A. direct reads by known id
@@ -96,16 +96,16 @@ test('hardening 1.5', async (t) => {
         assert.equal((await C.c.del(`/api/tasks/${id}`)).status, 404, `delete ${label}`);
       }
       const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-      assert.ok(same(taskRow(T1.id), before.t1), 'T1 unchanged in the database');
-      assert.ok(same(taskRow(T2.id), before.t2), 'T2 unchanged in the database (their own former task)');
+      assert.ok(same(await taskRow(T1.id), before.t1), 'T1 unchanged in the database');
+      assert.ok(same(await taskRow(T2.id), before.t2), 'T2 unchanged in the database (their own former task)');
       // D. comment
       const cm = await C.c.post(`/api/tasks/${T1.id}/comments`, { body: 'COMMENT-FROM-FORMER-MEMBER' });
       assert.equal(cm.status, 404);
       assert.equal((await C.c.post(`/api/tasks/${T2.id}/comments`, { body: 'COMMENT-FROM-FORMER-MEMBER' })).status, 404);
-      assert.equal(db.get('SELECT COUNT(*) c FROM task_comments').c, before.comments, 'no comment was written');
-      assert.equal(db.get('SELECT COUNT(*) c FROM activity_log').c, before.activity, 'no family activity was generated');
-      assert.equal(db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [B.id]).c, before.notifsB, 'B received nothing');
-      assert.equal(db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [A.id]).c, before.notifsA, 'A received nothing');
+      assert.equal((await db.get('SELECT COUNT(*) c FROM task_comments')).c, before.comments, 'no comment was written');
+      assert.equal((await db.get('SELECT COUNT(*) c FROM activity_log')).c, before.activity, 'no family activity was generated');
+      assert.equal((await db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [B.id])).c, before.notifsB, 'B received nothing');
+      assert.equal((await db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [A.id])).c, before.notifsA, 'A received nothing');
 
       // G. search (titles, descriptions, comment text)
       for (const q of ['FAMTASK', 'PRIVATETASK', 'THREAD', 'COMMENT-by-C']) {
@@ -124,7 +124,7 @@ test('hardening 1.5', async (t) => {
       const n = await notifs(C);
       assert.ok(!/FAMTASK|PRIVATETASK|THREAD|COMMENT-by-C-while-member/.test(JSON.stringify(n.notifications)), 'notifications are filtered');
       assert.equal(n.unreadCount, n.notifications.filter((x) => !x.read).length, 'unread count matches what is shown');
-      assert.ok(db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [C.id]).c > n.notifications.length, 'the hidden rows still exist in the database (nothing deleted)');
+      assert.ok((await db.get('SELECT COUNT(*) c FROM notifications WHERE user_id = ?', [C.id])).c > n.notifications.length, 'the hidden rows still exist in the database (nothing deleted)');
       // family feed and export
       assert.equal((await C.c.get(`/api/family/${fam.id}/activity`)).status, 403);
       const exp = (await C.c.get('/api/settings/export')).data;
@@ -152,7 +152,7 @@ test('hardening 1.5', async (t) => {
       assert.equal((await A.c.patch(`/api/tasks/${T2.id}`, { title: 'FAMTASK-two edited by a member' })).status, 200, 'ordinary member-level edit works');
       assert.equal((await A.c.del(`/api/tasks/${T4.id}`)).status, 404, 'and cannot touch C\'s private tasks');
       assert.equal((await A.c.del(`/api/tasks/${T2.id}`)).status, 200, 'the family owner can remove the orphaned family task');
-      assert.equal(taskRow(T2.id), undefined);
+      assert.equal(await taskRow(T2.id), undefined);
 
       // Rejoin restores access according to normal membership rules.
       const rejoinCode = mode === 'voluntary leave' ? code : await codeOf(A, fam.id);
@@ -173,15 +173,15 @@ test('hardening 1.5', async (t) => {
 
     // family-visible task, assigned to B
     const t1 = await mk({ assignedTo: B.id });
-    const state = (id) => { const r = taskRow(id); return `${r.visibility}|${r.assigned_to}|${r.family_id}|${r.title}`; };
-    const s0 = state(t1.id);
+    const state = async (id) => { const r = await taskRow(id); return `${r.visibility}|${r.assigned_to}|${r.family_id}|${r.title}`; };
+    const s0 = await state(t1.id);
     for (const [who, u, want] of [['assignee B', B, 403], ['ordinary member E', E, 403], ['former member C', C, 404], ['other-family user D', D, 404]]) {
       assert.equal((await u.c.patch(`/api/tasks/${t1.id}`, { visibility: 'private' })).status, want, `${who}: visibility`);
       assert.equal((await u.c.patch(`/api/tasks/${t1.id}`, { assignedTo: E.id })).status, want, `${who}: assignee`);
       assert.equal((await u.c.patch(`/api/tasks/${t1.id}`, { assignedTo: null })).status, want, `${who}: unassign`);
     }
     assert.equal((await anon().patch(`/api/tasks/${t1.id}`, { visibility: 'private' })).status, 401);
-    assert.equal(state(t1.id), s0, 'nothing changed in the database');
+    assert.equal(await state(t1.id), s0, 'nothing changed in the database');
 
     // the same people MAY edit content, and MAY submit the unchanged visibility / assignee / family (what the edit form sends)
     for (const [who, u] of [['assignee B', B], ['ordinary member E', E], ['owner A', A]]) {
@@ -189,14 +189,14 @@ test('hardening 1.5', async (t) => {
       assert.equal(r.status, 200, `${who}: ordinary edit with unchanged visibility/family/assignee`);
       assert.equal(r.data.task.visibility, 'family');
     }
-    assert.equal(taskRow(t1.id).assigned_to, B.id);
+    assert.equal((await taskRow(t1.id)).assigned_to, B.id);
 
     // the owner may change both
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { assignedTo: E.id })).status, 200);
-    assert.equal(taskRow(t1.id).assigned_to, E.id);
+    assert.equal((await taskRow(t1.id)).assigned_to, E.id);
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { assignedTo: D.id })).status, 400, 'assignee must still be a family member');
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { visibility: 'private' })).status, 200);
-    assert.equal(taskRow(t1.id).visibility, 'private');
+    assert.equal((await taskRow(t1.id)).visibility, 'private');
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { visibility: 'whatever' })).status, 400, 'invalid visibility value');
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { visibility: 'family' })).status, 200, 'owner may share it again');
 
@@ -205,7 +205,7 @@ test('hardening 1.5', async (t) => {
     assert.equal((await B.c.patch(`/api/tasks/${t2.id}`, { visibility: 'family' })).status, 403);
     assert.equal((await B.c.patch(`/api/tasks/${t2.id}`, { assignedTo: E.id })).status, 403);
     assert.equal((await E.c.get(`/api/tasks/${t2.id}`)).status, 404, 'E still cannot read it');
-    assert.equal(taskRow(t2.id).visibility, 'private');
+    assert.equal((await taskRow(t2.id)).visibility, 'private');
     assert.equal((await B.c.patch(`/api/tasks/${t2.id}`, { status: 'completed' })).status, 200, 'the assignee can still complete it (existing permission)');
 
     // an owner who has left the family cannot share a task into it again; a task cannot be moved between families
@@ -213,7 +213,7 @@ test('hardening 1.5', async (t) => {
     const t3 = (await F.c.post('/api/tasks', { title: 'F owns private-in-family', familyId: fam.id, visibility: 'private' })).data.task;
     await F.c.post(`/api/family/${fam.id}/leave`, {});
     assert.equal((await F.c.patch(`/api/tasks/${t3.id}`, { visibility: 'family' })).status, 403, 'not a member any more');
-    assert.equal(taskRow(t3.id).visibility, 'private');
+    assert.equal((await taskRow(t3.id)).visibility, 'private');
     const famY = (await D.c.post('/api/family', { name: 'Y2' })).data.family;
     assert.equal((await A.c.patch(`/api/tasks/${t1.id}`, { familyId: famY.id })).status, 400, 'no moving between families');
   });
@@ -231,7 +231,7 @@ test('hardening 1.5', async (t) => {
     ]) {
       const r = await A.c.patch(`/api/tasks/${priv.id}`, patch);
       assert.equal(r.status, 200, JSON.stringify(patch));
-      assert.equal(taskRow(priv.id).visibility, 'private', `still private after ${JSON.stringify(patch)}`);
+      assert.equal((await taskRow(priv.id)).visibility, 'private', `still private after ${JSON.stringify(patch)}`);
       assert.equal((await B.c.get(`/api/tasks/${priv.id}`)).status, 404, 'a member still cannot read it');
     }
     assert.ok(!/PRIV-EDIT/.test(JSON.stringify((await B.c.get(`/api/family/${fam.id}/activity`)).data)));
@@ -244,7 +244,7 @@ test('hardening 1.5', async (t) => {
     const solo = (await A.c.post('/api/tasks', { title: 'SOLO-SHARE' })).data.task;
     assert.equal((await A.c.patch(`/api/tasks/${solo.id}`, { visibility: 'family' })).status, 400, 'needs a family');
     assert.equal((await A.c.patch(`/api/tasks/${solo.id}`, { visibility: 'family', familyId: fam.id })).status, 200);
-    assert.deepEqual([taskRow(solo.id).visibility, taskRow(solo.id).family_id], ['family', fam.id]);
+    assert.deepEqual([(await taskRow(solo.id)).visibility, (await taskRow(solo.id)).family_id], ['family', fam.id]);
     assert.equal((await B.c.get(`/api/tasks/${solo.id}`)).status, 200);
   });
 
@@ -255,7 +255,7 @@ test('hardening 1.5', async (t) => {
     const task = (await A.c.post('/api/tasks', { title: 'NOTIF-TASK-TITLE', familyId: fam.id, visibility: 'family', assignedTo: B.id })).data.task;
     await B.c.post(`/api/tasks/${task.id}/comments`, { body: 'NOTIF-COMMENT-BODY' });
     assert.ok(/NOTIF-TASK-TITLE/.test(await notifText(M2)) && /NOTIF-COMMENT-BODY/.test(await notifText(M2)), 'precondition: M2 was told while it was family-visible');
-    const totalBefore = db.get('SELECT COUNT(*) c FROM notifications').c;
+    const totalBefore = (await db.get('SELECT COUNT(*) c FROM notifications')).c;
     const unreadBefore = (await notifs(M2)).unreadCount;
     assert.ok(unreadBefore >= 2);
 
@@ -263,7 +263,7 @@ test('hardening 1.5', async (t) => {
     const after = await notifs(M2);
     assert.ok(!/NOTIF-TASK-TITLE|NOTIF-COMMENT-BODY/.test(JSON.stringify(after.notifications)), 'old notification no longer exposes task-linked information');
     assert.equal(after.unreadCount, 0, 'and is not counted');
-    assert.equal(db.get('SELECT COUNT(*) c FROM notifications').c, totalBefore, 'nothing was deleted');
+    assert.equal((await db.get('SELECT COUNT(*) c FROM notifications')).c, totalBefore, 'nothing was deleted');
     // people who still have access still see theirs
     assert.ok(/NOTIF-COMMENT-BODY|NOTIF-TASK-TITLE/.test(await notifText(A)) || true);
     assert.ok(/NOTIF-TASK-TITLE/.test(await notifText(B)), 'assignee still sees the assignment notification');
@@ -276,8 +276,8 @@ test('hardening 1.5', async (t) => {
     // former member, other-family user, nonexistent task
     await C.c.post(`/api/family/${fam.id}/leave`, {});
     assert.ok(!/NOTIF-/.test(await notifText(C)), 'former member');
-    db.run("INSERT INTO notifications (user_id, type, title, link) VALUES (?, 'task', 'GHOST-TASK-ROW', '#/tasks/424242')", [B.id]);
-    db.run("INSERT INTO notifications (user_id, type, title, link) VALUES (?, 'chat', 'CHAT-ROW', '#/family/chat')", [B.id]);
+    await db.run("INSERT INTO notifications (user_id, type, title, link) VALUES (?, 'task', 'GHOST-TASK-ROW', '#/tasks/424242')", [B.id]);
+    await db.run("INSERT INTO notifications (user_id, type, title, link) VALUES (?, 'chat', 'CHAT-ROW', '#/family/chat')", [B.id]);
     const bText = await notifText(B);
     assert.ok(/GHOST-TASK-ROW/.test(bText), 'reference to a task that does not exist is handled safely and kept');
     assert.ok(/CHAT-ROW/.test(bText), 'non-task notifications are untouched (chat/bill attribution is out of scope)');
@@ -371,25 +371,28 @@ test('hardening 1.5', async (t) => {
     const t1 = (await A.c.post('/api/tasks', { title: 'MIGRATION-TASK', familyId: fam.id, visibility: 'family' })).data.task;
     const current = (await A.c.post('/api/family', { name: 'Already strong' })).data.family;
     const demoFam = (await B.c.post('/api/family', { name: 'Demo-like' })).data.family;
-    db.run("UPDATE families SET invite_code = 'A1B2C3D4' WHERE id = ?", [legacyFam.id]);
-    db.run("UPDATE families SET invite_code = 'DEMO4821' WHERE id = ?", [demoFam.id]);
-    const snapshot = () => JSON.stringify({
-      fam: db.all('SELECT id, name, owner_id FROM families ORDER BY id'),
-      members: db.all('SELECT family_id, user_id, role FROM family_members ORDER BY id'),
-      tasks: db.all('SELECT id, title, family_id, visibility FROM tasks ORDER BY id'),
-      messages: db.get('SELECT COUNT(*) c FROM messages').c,
+    await db.run("UPDATE families SET invite_code = 'A1B2C3D4' WHERE id = ?", [legacyFam.id]);
+    await db.run("UPDATE families SET invite_code = 'DEMO4821' WHERE id = ?", [demoFam.id]);
+    const snapshot = async () => JSON.stringify({
+      fam: await db.all('SELECT id, name, owner_id FROM families ORDER BY id'),
+      members: await db.all('SELECT family_id, user_id, role FROM family_members ORDER BY id'),
+      tasks: await db.all('SELECT id, title, family_id, visibility FROM tasks ORDER BY id'),
+      messages: (await db.get('SELECT COUNT(*) c FROM messages')).c,
     });
-    const before = snapshot();
-    const strongBefore = db.get('SELECT invite_code FROM families WHERE id = ?', [current.id]).invite_code;
-    const restart = () => execFileSync(process.execPath, ['-e', "require('./src/db')"], { cwd: path.join(__dirname, '..'), env: { ...process.env, LIFEADMIN_DB_PATH: process.env.LIFEADMIN_DB_PATH, NODE_ENV: 'test' }, encoding: 'utf8' });
-    restart();
-    const codes = () => Object.fromEntries(db.all('SELECT id, invite_code FROM families').map((r) => [r.id, r.invite_code]));
-    const c1 = codes();
+    const before = await snapshot();
+    const strongBefore = (await db.get('SELECT invite_code FROM families WHERE id = ?', [current.id])).invite_code;
+    const restart = async () => {
+      await db.close();
+      await db.ready();
+    };
+    await restart();
+    const codes = async () => Object.fromEntries((await db.all('SELECT id, invite_code FROM families')).map((r) => [r.id, r.invite_code]));
+    const c1 = await codes();
     assert.match(c1[legacyFam.id], CODE_RE, 'legacy hex code replaced');
     assert.match(c1[demoFam.id], CODE_RE, 'legacy DEMO#### code replaced');
     assert.notEqual(c1[legacyFam.id], c1[demoFam.id]);
     assert.equal(c1[current.id], strongBefore, 'a valid 12-character code is not rotated');
-    assert.equal(snapshot(), before, 'families, members, ownership, tasks and messages unchanged');
+    assert.equal(await snapshot(), before, 'families, members, ownership, tasks and messages unchanged');
     // old codes dead, new works
     const X = await newUser(), Y = await newUser();
     assert.equal((await X.c.post('/api/family/join', { code: 'A1B2C3D4' })).status, 400);
@@ -398,9 +401,9 @@ test('hardening 1.5', async (t) => {
     assert.equal((await Y.c.post('/api/family/join', { code: strongBefore })).status, 201);
     assert.equal(await codeOf(A, legacyFam.id), c1[legacyFam.id], 'owner sees the new code');
     // restarts change nothing further
-    restart(); restart();
-    assert.deepEqual(codes(), c1, 'no repeated rotation on restart');
-    assert.equal(db.get('SELECT COUNT(DISTINCT invite_code) c FROM families').c, db.get('SELECT COUNT(*) c FROM families').c, 'no duplicate codes');
-    assert.equal(taskRow(t1.id).title, 'MIGRATION-TASK');
+    await restart(); await restart();
+    assert.deepEqual(await codes(), c1, 'no repeated rotation on restart');
+    assert.equal((await db.get('SELECT COUNT(DISTINCT invite_code) c FROM families')).c, (await db.get('SELECT COUNT(*) c FROM families')).c, 'no duplicate codes');
+    assert.equal((await taskRow(t1.id)).title, 'MIGRATION-TASK');
   });
 });

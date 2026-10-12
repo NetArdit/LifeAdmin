@@ -11,7 +11,7 @@ const CATEGORIES = ['transport', 'energy', 'food', 'shopping', 'waste', 'water']
 router.get(
   '/',
   asyncRoute(async (req, res) => {
-    const rows = db.all('SELECT * FROM eco_logs WHERE owner_id = ? ORDER BY logged_at DESC LIMIT 100', [req.user.id]);
+    const rows = await db.all('SELECT * FROM eco_logs WHERE owner_id = ? ORDER BY logged_at DESC LIMIT 100', [req.user.id]);
     res.json({ logs: rows });
   })
 );
@@ -20,7 +20,7 @@ router.get(
 router.get(
   '/summary',
   asyncRoute(async (req, res) => {
-    const rows = db.all(
+    const rows = await db.all(
       `SELECT * FROM eco_logs WHERE owner_id = ? AND logged_at >= datetime('now', '-30 days')`,
       [req.user.id]
     );
@@ -41,7 +41,7 @@ router.post(
   '/tips',
   asyncRoute(async (req, res) => {
     if (ai.userAiDisabled(req.user)) return res.json(ai.AI_DISABLED_BY_USER);
-    const rows = db.all(
+    const rows = await db.all(
       `SELECT category, action, quantity, unit FROM eco_logs WHERE owner_id = ? AND logged_at >= datetime('now', '-30 days') LIMIT 60`,
       [req.user.id]
     );
@@ -56,20 +56,20 @@ router.post(
     const b = req.body || {};
     if (!CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
     if (!isNonEmpty(b.action)) throw new ValidationError('Describe the action.');
-    const result = db.run(
+    const result = await db.run(
       'INSERT INTO eco_logs (owner_id, category, action, quantity, unit, notes) VALUES (?,?,?,?,?,?)',
       [req.user.id, b.category, b.action.trim(), b.quantity ?? null, b.unit || null, b.notes || null]
     );
-    res.status(201).json({ log: db.get('SELECT * FROM eco_logs WHERE id = ?', [result.lastInsertRowid]) });
+    res.status(201).json({ log: await db.get('SELECT * FROM eco_logs WHERE id = ?', [result.lastInsertRowid]) });
   })
 );
 
 router.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    const row = db.get('SELECT * FROM eco_logs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+    const row = await db.get('SELECT * FROM eco_logs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!row) return res.status(404).json({ error: 'Log not found.' });
-    db.run('DELETE FROM eco_logs WHERE id = ?', [row.id]);
+    await db.run('DELETE FROM eco_logs WHERE id = ?', [row.id]);
     res.json({ ok: true });
   })
 );

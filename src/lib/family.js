@@ -2,16 +2,16 @@ const db = require('../db');
 const { ValidationError } = require('./validate');
 const { generateInviteCode } = require('./inviteCode');
 
-function getUserFamilyIds(userId) {
-  return db.all('SELECT family_id FROM family_members WHERE user_id = ?', [userId]).map((r) => r.family_id);
+async function getUserFamilyIds(userId) {
+  return (await db.all('SELECT family_id FROM family_members WHERE user_id = ?', [userId])).map((r) => r.family_id);
 }
 
-function getMembership(userId, familyId) {
-  return db.get('SELECT * FROM family_members WHERE user_id = ? AND family_id = ?', [userId, familyId]);
+async function getMembership(userId, familyId) {
+  return await db.get('SELECT * FROM family_members WHERE user_id = ? AND family_id = ?', [userId, familyId]);
 }
 
-function requireMembership(userId, familyId) {
-  const m = getMembership(userId, familyId);
+async function requireMembership(userId, familyId) {
+  const m = await getMembership(userId, familyId);
   if (!m) {
     const err = new ValidationError('You are not a member of this circle.');
     err.status = 403;
@@ -20,8 +20,8 @@ function requireMembership(userId, familyId) {
   return m;
 }
 
-function requireRole(userId, familyId, roles) {
-  const m = requireMembership(userId, familyId);
+async function requireRole(userId, familyId, roles) {
+  const m = await requireMembership(userId, familyId);
   if (!roles.includes(m.role)) {
     const err = new ValidationError('You do not have permission to do this.');
     err.status = 403;
@@ -30,26 +30,26 @@ function requireRole(userId, familyId, roles) {
   return m;
 }
 
-function logActivity({ userId = null, familyId = null, type, summary, link = null }) {
-  db.run(
+async function logActivity({ userId = null, familyId = null, type, summary, link = null }) {
+  await db.run(
     `INSERT INTO activity_log (user_id, family_id, type, summary, link) VALUES (?, ?, ?, ?, ?)`,
     [userId, familyId, type, summary, link]
   );
 }
 
 // A fresh invite code that no family currently uses.
-function newUniqueInviteCode() {
+async function newUniqueInviteCode() {
   let code;
   do {
     code = generateInviteCode();
-  } while (db.get('SELECT id FROM families WHERE invite_code = ?', [code]));
+  } while (await db.get('SELECT id FROM families WHERE invite_code = ?', [code]));
   return code;
 }
 
 // Replaces a family's invite code; the previous code stops working at once.
-function rotateInviteCode(familyId) {
-  const code = newUniqueInviteCode();
-  db.run('UPDATE families SET invite_code = ? WHERE id = ?', [code, familyId]);
+async function rotateInviteCode(familyId) {
+  const code = await newUniqueInviteCode();
+  await db.run('UPDATE families SET invite_code = ? WHERE id = ?', [code, familyId]);
   return code;
 }
 

@@ -8,11 +8,11 @@ const ai = require('../lib/ai');
 
 const router = express.Router();
 
-function loadFull(decisionId, userId) {
-  const decision = db.get('SELECT * FROM decisions WHERE id = ? AND owner_id = ?', [decisionId, userId]);
+async function loadFull(decisionId, userId) {
+  const decision = await db.get('SELECT * FROM decisions WHERE id = ? AND owner_id = ?', [decisionId, userId]);
   if (!decision) return null;
-  const criteria = db.all('SELECT * FROM decision_criteria WHERE decision_id = ?', [decisionId]);
-  const options = db.all('SELECT * FROM decision_options WHERE decision_id = ?', [decisionId]);
+  const criteria = await db.all('SELECT * FROM decision_criteria WHERE decision_id = ?', [decisionId]);
+  const options = await db.all('SELECT * FROM decision_options WHERE decision_id = ?', [decisionId]);
   return { decision, criteria, options };
 }
 
@@ -75,7 +75,7 @@ function mapDecision(d) {
 router.get(
   '/',
   asyncRoute(async (req, res) => {
-    const rows = db.all('SELECT * FROM decisions WHERE owner_id = ? ORDER BY created_at DESC', [req.user.id]);
+    const rows = await db.all('SELECT * FROM decisions WHERE owner_id = ? ORDER BY created_at DESC', [req.user.id]);
     res.json({ decisions: rows.map(mapDecision) });
   })
 );
@@ -85,15 +85,15 @@ router.post(
   asyncRoute(async (req, res) => {
     const question = req.body && req.body.question;
     if (!isNonEmpty(question)) throw new ValidationError('Describe the decision you want help with.');
-    const result = db.run('INSERT INTO decisions (owner_id, question) VALUES (?, ?)', [req.user.id, question.trim()]);
-    res.status(201).json({ decision: mapDecision(db.get('SELECT * FROM decisions WHERE id = ?', [result.lastInsertRowid])) });
+    const result = await db.run('INSERT INTO decisions (owner_id, question) VALUES (?, ?)', [req.user.id, question.trim()]);
+    res.status(201).json({ decision: mapDecision(await db.get('SELECT * FROM decisions WHERE id = ?', [result.lastInsertRowid])) });
   })
 );
 
 router.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const scoring = scoreOptions(full.criteria, full.options);
     const decision = mapDecision(full.decision);
@@ -118,7 +118,7 @@ router.get(
 router.post(
   '/:id/analyze',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
 
     const existingOptions = (req.body && req.body.options) || full.options.map((o) => o.name);
@@ -138,7 +138,7 @@ router.post(
     const existingCriteriaNames = new Set(full.criteria.map((c) => c.name.toLowerCase()));
     for (const c of data.suggestedCriteria) {
       if (!existingCriteriaNames.has(c.name.toLowerCase())) {
-        db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [
+        await db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [
           full.decision.id,
           c.name,
           c.weight,
@@ -146,7 +146,7 @@ router.post(
         existingCriteriaNames.add(c.name.toLowerCase());
       }
     }
-    const criteria = db.all('SELECT * FROM decision_criteria WHERE decision_id = ?', [full.decision.id]);
+    const criteria = await db.all('SELECT * FROM decision_criteria WHERE decision_id = ?', [full.decision.id]);
     const criteriaByName = Object.fromEntries(criteria.map((c) => [c.name.toLowerCase(), c]));
 
     // Upsert options with AI analysis.
@@ -159,7 +159,7 @@ router.post(
       }
       const existing = existingOptionsByName[opt.name.toLowerCase()];
       if (existing) {
-        db.run('UPDATE decision_options SET pros = ?, cons = ?, risks = ?, scores = ? WHERE id = ?', [
+        await db.run('UPDATE decision_options SET pros = ?, cons = ?, risks = ?, scores = ? WHERE id = ?', [
           JSON.stringify(opt.pros || []),
           JSON.stringify(opt.cons || []),
           JSON.stringify(opt.risks || []),
@@ -167,7 +167,7 @@ router.post(
           existing.id,
         ]);
       } else {
-        db.run('INSERT INTO decision_options (decision_id, name, pros, cons, risks, scores) VALUES (?,?,?,?,?,?)', [
+        await db.run('INSERT INTO decision_options (decision_id, name, pros, cons, risks, scores) VALUES (?,?,?,?,?,?)', [
           full.decision.id,
           opt.name,
           JSON.stringify(opt.pros || []),
@@ -178,7 +178,7 @@ router.post(
       }
     }
 
-    const finalOptions = db.all('SELECT * FROM decision_options WHERE decision_id = ?', [full.decision.id]);
+    const finalOptions = await db.all('SELECT * FROM decision_options WHERE decision_id = ?', [full.decision.id]);
     const scoring = scoreOptions(criteria, finalOptions);
     const recommendation = {
       reasoningSummary: data.reasoningSummary,
@@ -186,14 +186,14 @@ router.post(
       confidence: scoring.confidence,
       recommendedOptionId: scoring.recommendedOptionId,
     };
-    db.run("UPDATE decisions SET recommendation = ?, updated_at = datetime('now') WHERE id = ?", [
+    await db.run("UPDATE decisions SET recommendation = ?, updated_at = datetime('now') WHERE id = ?", [
       JSON.stringify(recommendation),
       full.decision.id,
     ]);
 
     res.json({
       ok: true,
-      decision: mapDecision(db.get('SELECT * FROM decisions WHERE id = ?', [full.decision.id])),
+      decision: mapDecision(await db.get('SELECT * FROM decisions WHERE id = ?', [full.decision.id])),
       criteria: criteria.map((c) => ({ id: c.id, name: c.name, weight: c.weight })),
       options: finalOptions.map((o) => ({ id: o.id, name: o.name, pros: safeJson(o.pros, []), cons: safeJson(o.cons, []), risks: safeJson(o.risks, []) })),
       scoring,
@@ -204,26 +204,26 @@ router.post(
 router.post(
   '/:id/criteria',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const { name, weight } = req.body || {};
     if (!isNonEmpty(name)) throw new ValidationError('Criterion name is required.');
-    const result = db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [
+    const result = await db.run('INSERT INTO decision_criteria (decision_id, name, weight) VALUES (?, ?, ?)', [
       full.decision.id,
       name.trim(),
       Math.min(5, Math.max(1, Number(weight) || 3)),
     ]);
-    res.status(201).json({ criterion: db.get('SELECT * FROM decision_criteria WHERE id = ?', [result.lastInsertRowid]) });
+    res.status(201).json({ criterion: await db.get('SELECT * FROM decision_criteria WHERE id = ?', [result.lastInsertRowid]) });
   })
 );
 
 router.patch(
   '/:id/criteria/:critId',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const weight = Math.min(5, Math.max(1, Number(req.body && req.body.weight) || 3));
-    db.run('UPDATE decision_criteria SET weight = ? WHERE id = ? AND decision_id = ?', [weight, req.params.critId, full.decision.id]);
+    await db.run('UPDATE decision_criteria SET weight = ? WHERE id = ? AND decision_id = ?', [weight, req.params.critId, full.decision.id]);
     res.json({ ok: true });
   })
 );
@@ -231,9 +231,9 @@ router.patch(
 router.delete(
   '/:id/criteria/:critId',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
-    db.run('DELETE FROM decision_criteria WHERE id = ? AND decision_id = ?', [req.params.critId, full.decision.id]);
+    await db.run('DELETE FROM decision_criteria WHERE id = ? AND decision_id = ?', [req.params.critId, full.decision.id]);
     res.json({ ok: true });
   })
 );
@@ -241,19 +241,19 @@ router.delete(
 router.post(
   '/:id/options',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const { name } = req.body || {};
     if (!isNonEmpty(name)) throw new ValidationError('Option name is required.');
-    const result = db.run('INSERT INTO decision_options (decision_id, name) VALUES (?, ?)', [full.decision.id, name.trim()]);
-    res.status(201).json({ option: db.get('SELECT * FROM decision_options WHERE id = ?', [result.lastInsertRowid]) });
+    const result = await db.run('INSERT INTO decision_options (decision_id, name) VALUES (?, ?)', [full.decision.id, name.trim()]);
+    res.status(201).json({ option: await db.get('SELECT * FROM decision_options WHERE id = ?', [result.lastInsertRowid]) });
   })
 );
 
 router.patch(
   '/:id/options/:optId',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const option = full.options.find((o) => String(o.id) === req.params.optId);
     if (!option) return res.status(404).json({ error: 'Option not found.' });
@@ -262,10 +262,10 @@ router.patch(
     if (b.criterionId != null && b.rating != null) {
       const scores = safeJson(option.scores, {});
       scores[String(b.criterionId)] = Math.min(5, Math.max(1, Number(b.rating)));
-      db.run('UPDATE decision_options SET scores = ? WHERE id = ?', [JSON.stringify(scores), option.id]);
+      await db.run('UPDATE decision_options SET scores = ? WHERE id = ?', [JSON.stringify(scores), option.id]);
     }
-    if (b.pros) db.run('UPDATE decision_options SET pros = ? WHERE id = ?', [JSON.stringify(b.pros), option.id]);
-    if (b.cons) db.run('UPDATE decision_options SET cons = ? WHERE id = ?', [JSON.stringify(b.cons), option.id]);
+    if (b.pros) await db.run('UPDATE decision_options SET pros = ? WHERE id = ?', [JSON.stringify(b.pros), option.id]);
+    if (b.cons) await db.run('UPDATE decision_options SET cons = ? WHERE id = ?', [JSON.stringify(b.cons), option.id]);
     res.json({ ok: true });
   })
 );
@@ -273,13 +273,13 @@ router.patch(
 router.delete(
   '/:id/options/:optId',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
-    db.run('DELETE FROM decision_options WHERE id = ? AND decision_id = ?', [req.params.optId, full.decision.id]);
+    await db.run('DELETE FROM decision_options WHERE id = ? AND decision_id = ?', [req.params.optId, full.decision.id]);
     // Deleting the option that was chosen reopens the decision; it used to
     // stay "decided" on an option that no longer exists.
     if (String(full.decision.chosen_option_id) === String(req.params.optId)) {
-      db.run("UPDATE decisions SET status = 'open', chosen_option_id = NULL, updated_at = datetime('now') WHERE id = ?", [full.decision.id]);
+      await db.run("UPDATE decisions SET status = 'open', chosen_option_id = NULL, updated_at = datetime('now') WHERE id = ?", [full.decision.id]);
     }
     res.json({ ok: true });
   })
@@ -288,15 +288,15 @@ router.delete(
 router.post(
   '/:id/decide',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
     const optionId = req.body && req.body.optionId;
     if (!full.options.find((o) => o.id === optionId)) throw new ValidationError('Invalid option.');
-    db.run("UPDATE decisions SET status = 'decided', chosen_option_id = ?, updated_at = datetime('now') WHERE id = ?", [
+    await db.run("UPDATE decisions SET status = 'decided', chosen_option_id = ?, updated_at = datetime('now') WHERE id = ?", [
       optionId,
       full.decision.id,
     ]);
-    logActivity({
+    await logActivity({
       userId: req.user.id,
       familyId: full.decision.family_id,
       type: 'decision_made',
@@ -310,9 +310,9 @@ router.post(
 router.delete(
   '/:id',
   asyncRoute(async (req, res) => {
-    const full = loadFull(req.params.id, req.user.id);
+    const full = await loadFull(req.params.id, req.user.id);
     if (!full) return res.status(404).json({ error: 'Decision not found.' });
-    db.run('DELETE FROM decisions WHERE id = ?', [full.decision.id]);
+    await db.run('DELETE FROM decisions WHERE id = ?', [full.decision.id]);
     res.json({ ok: true });
   })
 );

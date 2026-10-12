@@ -22,7 +22,7 @@ router.get(
   '/:familyId/messages',
   asyncRoute(async (req, res) => {
     const familyId = Number(req.params.familyId);
-    requireMembership(req.user.id, familyId);
+    await requireMembership(req.user.id, familyId);
     const since = req.query.since;
     // Message-window fix (Daily Product Quality phase): this used to be
     // `ORDER BY created_at ASC LIMIT 200`, which always returns the OLDEST
@@ -50,7 +50,7 @@ router.get(
       params.push(since);
     }
     sql += ' ORDER BY m.created_at DESC, m.id DESC LIMIT 200';
-    const rows = db.all(sql, params).reverse();
+    const rows = (await db.all(sql, params)).reverse();
     res.json({ messages: rows.map(mapMessage) });
   })
 );
@@ -59,24 +59,24 @@ router.post(
   '/:familyId/messages',
   asyncRoute(async (req, res) => {
     const familyId = Number(req.params.familyId);
-    requireMembership(req.user.id, familyId);
+    await requireMembership(req.user.id, familyId);
     const body = req.body && req.body.body;
     if (!isNonEmpty(body)) throw new ValidationError('Message cannot be empty.');
 
-    const result = db.run('INSERT INTO messages (family_id, user_id, body) VALUES (?, ?, ?)', [
+    const result = await db.run('INSERT INTO messages (family_id, user_id, body) VALUES (?, ?, ?)', [
       familyId,
       req.user.id,
       body.trim(),
     ]);
 
-    notifyFamily(familyId, req.user.id, {
+    await notifyFamily(familyId, req.user.id, {
       type: 'chat',
       title: `${req.user.first_name} sent a message`,
       body: body.trim().slice(0, 140),
       link: '#/family/chat',
     });
 
-    const m = db.get(
+    const m = await db.get(
       `SELECT m.*, u.first_name, u.last_name FROM messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?`,
       [result.lastInsertRowid]
     );
@@ -88,20 +88,20 @@ router.post(
   '/:familyId/messages/:messageId/react',
   asyncRoute(async (req, res) => {
     const familyId = Number(req.params.familyId);
-    requireMembership(req.user.id, familyId);
+    await requireMembership(req.user.id, familyId);
     // Hardening 1 / F-02: authorisation follows message -> family -> membership.
     // The message must exist AND belong to the family the requester was just proven a
     // member of; anything else (unknown id, or a message of another family) is the
     // same 404, so ids of other families' messages cannot be probed.
     const messageId = Number(req.params.messageId);
     const message = Number.isInteger(messageId)
-      ? db.get('SELECT id FROM messages WHERE id = ? AND family_id = ?', [messageId, familyId])
+      ? await db.get('SELECT id FROM messages WHERE id = ? AND family_id = ?', [messageId, familyId])
       : null;
     if (!message) return res.status(404).json({ error: 'Message not found.' });
     const emoji = req.body && req.body.emoji;
     if (!isNonEmpty(emoji)) throw new ValidationError('Emoji is required.');
     if (emoji.trim().length > 32) throw new ValidationError('That reaction is too long.');
-    db.run(
+    await db.run(
       `INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)`,
       [message.id, req.user.id, emoji.trim()]
     );

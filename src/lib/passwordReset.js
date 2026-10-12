@@ -51,7 +51,7 @@ function buildResetEmail({ link, minutes }) {
 // answers identically either way). A token that could not be delivered is
 // invalidated so a failed send never leaves a usable, undelivered link.
 async function requestPasswordReset(normalizedEmail) {
-  const user = db.get('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
+  const user = await db.get('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
   if (!user) return;
   const base = resetBaseUrl();
   if (!base) {
@@ -59,13 +59,13 @@ async function requestPasswordReset(normalizedEmail) {
     return;
   }
   try {
-    const token = createResetToken(user.id);
+    const token = await createResetToken(user.id);
     const minutes = Math.round(RESET_TOKEN_TTL_MS / 60000);
     const mail = buildResetEmail({ link: `${base}/#/reset-password/${token}`, minutes });
     const result = await sendMail({ to: normalizedEmail, ...mail });
-    if (!result.delivered) invalidateResetTokens(user.id);
+    if (!result.delivered) await invalidateResetTokens(user.id);
   } catch {
-    invalidateResetTokens(user.id);
+    await invalidateResetTokens(user.id);
     console.error('[LifeAdmin] Password reset email could not be sent.');
   }
 }

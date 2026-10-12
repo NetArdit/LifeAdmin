@@ -7,7 +7,7 @@ const router = express.Router();
 router.post(
   '/seed',
   asyncRoute(async (req, res) => {
-    const result = seedDemoForUser(req.user.id);
+    const result = await seedDemoForUser(req.user.id);
     res.json({ ok: true, ...result });
   })
 );
@@ -15,7 +15,7 @@ router.post(
 router.post(
   '/clear',
   asyncRoute(async (req, res) => {
-    clearDemoForUser(req.user.id);
+    await clearDemoForUser(req.user.id);
     res.json({ ok: true });
   })
 );

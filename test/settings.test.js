@@ -44,8 +44,8 @@ test('settings', async (t) => {
     await signUp(member);
     await member.post('/api/family/join', { code: family.inviteCode });
     const memberMe = (await member.get('/api/auth/me')).data.user;
-    const taskNotifCount = () =>
-      db.get("SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND type = 'task'", [memberMe.id]).c;
+    const taskNotifCount = async () =>
+      (await db.get("SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND type = 'task'", [memberMe.id])).c;
 
     // Before-state, with default preferences (task notifications on):
     // assigning a family task to the member DOES create a 'task'
@@ -57,7 +57,7 @@ test('settings', async (t) => {
       visibility: 'family',
       assignedTo: memberMe.id,
     });
-    assert.equal(taskNotifCount(), 1, 'precondition: default prefs create a task notification');
+    assert.equal(await taskNotifCount(), 1, 'precondition: default prefs create a task notification');
 
     // The member turns "Task reminders & deadlines" off.
     await member.patch('/api/settings/preferences', { notifPrefs: { task: false } });
@@ -69,7 +69,7 @@ test('settings', async (t) => {
       visibility: 'family',
       assignedTo: memberMe.id,
     });
-    assert.equal(taskNotifCount(), 1, 'member turned task notifications off — the count must not have grown');
+    assert.equal(await taskNotifCount(), 1, 'member turned task notifications off — the count must not have grown');
   });
 
   await t.test('password change: wrong current password rejected, correct one succeeds and old password stops working', async () => {

@@ -55,7 +55,7 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
   t.after(stopCapture);
 
   const message = { to: 'someone@example.test', subject: 'Hi', text: 'plain body', html: '<p>html body</p>' };
-  const unusedTokens = (userId) => db.get('SELECT COUNT(*) c FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL AND expires_at > ?', [userId, Date.now()]).c;
+  const unusedTokens = async (userId) => (await db.get('SELECT COUNT(*) c FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL AND expires_at > ?', [userId, Date.now()])).c;
 
   async function userWithEmail() {
     const c = makeClient(app.base);
@@ -204,7 +204,7 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
     assert.equal(res.data.ok, true);
     assert.ok(!JSON.stringify(res.data).includes(PROVIDER_SECRET_BODY));
     assert.equal(calls.length, 1);
-    assert.equal(unusedTokens(u.id), 0, 'the undeliverable token was invalidated');
+    assert.equal(await unusedTokens(u.id), 0, 'the undeliverable token was invalidated');
     const sent = JSON.parse(calls[0].body);
     const token = /reset-password\/([A-Za-z0-9_-]+)/.exec(sent.text)[1];
     assert.equal((await anon.post('/api/auth/reset-password', { token, password: 'never-works-123', confirmPassword: 'never-works-123' })).status, 400);
@@ -224,7 +224,7 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
     const u = await userWithEmail();
     const res = await makeClient(app.base).post('/api/auth/forgot-password', { email: u.payload.email });
     assert.equal(res.status, 200);
-    assert.equal(unusedTokens(u.id), 0);
+    assert.equal(await unusedTokens(u.id), 0);
     mode = 'ok';
   });
 
@@ -242,7 +242,7 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
     }
     process.env.NODE_ENV = 'test';
     assert.equal(calls.length, 0);
-    assert.equal(unusedTokens(u.id), 0);
+    assert.equal(await unusedTokens(u.id), 0);
   });
 
   await t.test('production logs contain no reset token or link even when the request succeeds', async () => {

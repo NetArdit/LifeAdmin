@@ -27,7 +27,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     return (await owner.c.get(`/api/family/${f.id}`)).data.family;
   }
   const memberRow = (fam, userId) => fam.members.find((m) => m.userId === userId);
-  const ownerRows = (familyId) => db.all("SELECT * FROM family_members WHERE family_id = ? AND role = 'owner'", [familyId]);
+  const ownerRows = async (familyId) => await db.all("SELECT * FROM family_members WHERE family_id = ? AND role = 'owner'", [familyId]);
   const anon = () => makeClient(app.base);
   const bill = (extra = {}) => ({ name: 'Rent', amount: 10, dueDate: '2030-01-01', recurrence: 'none', ...extra });
   const feed = async (u, fid) => (await u.c.get(`/api/family/${fid}/activity`)).data.activity.map((a) => a.summary);
@@ -46,8 +46,8 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await A.c.post('/api/bills', bill({ familyId: '1' }))).status, 400, 'non-integer family id');
     assert.equal((await A.c.post('/api/bills', bill({ familyId: -3 }))).status, 400);
     assert.equal((await anon().post('/api/bills', bill({ familyId: famA.id }))).status, 401);
-    assert.equal(db.get('SELECT COUNT(*) c FROM bills WHERE family_id = ? AND owner_id != ?', [famA.id, A.id]).c, 0);
-    assert.equal(db.get('SELECT COUNT(*) c FROM bills WHERE family_id = ?', [famB.id]).c, 0, 'nothing attached to Family B');
+    assert.equal((await db.get('SELECT COUNT(*) c FROM bills WHERE family_id = ? AND owner_id != ?', [famA.id, A.id])).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) c FROM bills WHERE family_id = ?', [famB.id])).c, 0, 'nothing attached to Family B');
     assert.deepEqual((await feed(B, famB.id)).filter((s) => /marked/.test(s)), []);
   });
 
@@ -74,8 +74,8 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await A.c.patch(`/api/bills/${mine.id}`, { familyId: famA.id, name: 'Renamed' })).status, 200, 'repeating the current value is harmless');
     assert.equal((await A.c.patch(`/api/bills/${mine.id}`, { name: 'Renamed again' })).data.bill.name, 'Renamed again');
     assert.equal((await B.c.patch(`/api/bills/${mine.id}`, { familyId: famB.id })).status, 404, 'B cannot touch A\'s bill at all');
-    assert.equal(db.get('SELECT family_id FROM bills WHERE id = ?', [mine.id]).family_id, famA.id);
-    assert.equal(db.get('SELECT family_id FROM bills WHERE id = ?', [plain.id]).family_id, null);
+    assert.equal((await db.get('SELECT family_id FROM bills WHERE id = ?', [mine.id])).family_id, famA.id);
+    assert.equal((await db.get('SELECT family_id FROM bills WHERE id = ?', [plain.id])).family_id, null);
   });
 
   await t.test('F-01 bills: after the owner leaves or is removed the family stops receiving that bill\'s activity; legacy foreign rows are neutralised', async () => {
@@ -83,17 +83,17 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const fam = await makeFamily(O, M, N);
     const mb = (await M.c.post('/api/bills', bill({ name: 'M bill', familyId: fam.id }))).data.bill;
     await M.c.post(`/api/family/${fam.id}/leave`, {});
-    assert.equal(db.get('SELECT family_id FROM bills WHERE id = ?', [mb.id]).family_id, null, 'association cleared on leave');
+    assert.equal((await db.get('SELECT family_id FROM bills WHERE id = ?', [mb.id])).family_id, null, 'association cleared on leave');
     await M.c.post(`/api/bills/${mb.id}/pay`, {});
     assert.ok(!(await feed(O, fam.id)).some((s) => /M bill/.test(s)));
     // removal clears too
     const nb = (await N.c.post('/api/bills', bill({ name: 'N bill', familyId: fam.id }))).data.bill;
     const famNow = (await O.c.get(`/api/family/${fam.id}`)).data.family;
     await O.c.del(`/api/family/${fam.id}/members/${memberRow(famNow, N.id).id}`);
-    assert.equal(db.get('SELECT family_id FROM bills WHERE id = ?', [nb.id]).family_id, null);
+    assert.equal((await db.get('SELECT family_id FROM bills WHERE id = ?', [nb.id])).family_id, null);
     // a row stored by the old bug (owner NOT a member of the family) must not write into that family
     const X = await newUser();
-    const legacy = db.run("INSERT INTO bills (owner_id, family_id, name, amount, due_date, recurrence) VALUES (?, ?, 'LEGACY-INJECT', 5, '2030-01-01', 'none')", [X.id, fam.id]);
+    const legacy = await db.run("INSERT INTO bills (owner_id, family_id, name, amount, due_date, recurrence) VALUES (?, ?, 'LEGACY-INJECT', 5, '2030-01-01', 'none')", [X.id, fam.id]);
     assert.equal((await X.c.post(`/api/bills/${legacy.lastInsertRowid}/pay`, {})).status, 200);
     assert.ok(!(await feed(O, fam.id)).some((s) => /LEGACY-INJECT/.test(s)), 'no feed entry');
     assert.ok(!(await notifs(O)).some((s) => /LEGACY-INJECT/.test(s)), 'no notification');
@@ -117,7 +117,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const famRow = (await A.c.get(`/api/family/${famA.id}`)).data.family;
     await A.c.del(`/api/family/${famA.id}/members/${memberRow(famRow, R.id).id}`);
     assert.equal((await react(R, famA.id, msg.id)).status, 403, 'removed member');
-    const reactions = db.all('SELECT user_id, emoji FROM message_reactions WHERE message_id = ?', [msg.id]);
+    const reactions = await db.all('SELECT user_id, emoji FROM message_reactions WHERE message_id = ?', [msg.id]);
     assert.deepEqual(reactions.map((r) => r.user_id).sort(), [A.id, A2.id].sort(), 'only the two legitimate reactions exist');
     const shown = (await A2.c.get(`/api/chat/${famA.id}/messages`)).data.messages[0].reactions;
     assert.equal(shown.length, 2, 'existing reaction behaviour preserved');
@@ -196,7 +196,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await anon().post(`/api/family/${fam.id}/invite-code/regenerate`, {})).status, 401);
     // reading / joining / page loads never rotate
     await O.c.get('/api/family'); await O.c.get(`/api/family/${fam.id}`);
-    assert.equal(db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id]).invite_code, fam.inviteCode);
+    assert.equal((await db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id])).invite_code, fam.inviteCode);
     const before = fam.inviteCode;
     const r = await O.c.post(`/api/family/${fam.id}/invite-code/regenerate`, {});
     assert.equal(r.status, 200);
@@ -207,7 +207,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const summaries = JSON.stringify((await O.c.get(`/api/family/${fam.id}/activity`)).data);
     assert.match(summaries, /changed the invite code/);
     assert.ok(!summaries.includes(r.data.inviteCode) && !summaries.includes(before), 'activity records that it changed, not the code');
-    const sqlDump = JSON.stringify(db.all('SELECT summary, link FROM activity_log'));
+    const sqlDump = JSON.stringify(await db.all('SELECT summary, link FROM activity_log'));
     assert.ok(!sqlDump.includes(r.data.inviteCode));
     // the joined family payload is what the UI shows
     assert.equal((await O.c.get(`/api/family/${fam.id}`)).data.family.inviteCode, r.data.inviteCode);
@@ -220,7 +220,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const old = fam.inviteCode;
     // voluntary leave keeps the code (the person chose to go; the owner can still rotate)
     await L.c.post(`/api/family/${fam.id}/leave`, {});
-    assert.equal(db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id]).invite_code, old);
+    assert.equal((await db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id])).invite_code, old);
     assert.equal((await L.c.post('/api/family/join', { code: old })).status, 201, 'a member who left may come back with a code they still hold (documented)');
     // an invited placeholder never held the code
     await O.c.post(`/api/family/${fam.id}/members`, { phone: '+38344909090', displayName: 'Guest' });
@@ -228,42 +228,46 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const guest = withGuest.members.find((m) => !m.registered);
     const rm1 = await O.c.del(`/api/family/${fam.id}/members/${guest.id}`);
     assert.equal(rm1.data.inviteCodeRotated, false);
-    assert.equal(db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id]).invite_code, old);
+    assert.equal((await db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id])).invite_code, old);
     // removing a registered member rotates
     const cur = (await O.c.get(`/api/family/${fam.id}`)).data.family;
     const rm2 = await O.c.del(`/api/family/${fam.id}/members/${memberRow(cur, M.id).id}`);
     assert.equal(rm2.status, 200);
     assert.equal(rm2.data.inviteCodeRotated, true);
-    const now = db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id]).invite_code;
+    const now = (await db.get('SELECT invite_code FROM families WHERE id = ?', [fam.id])).invite_code;
     assert.notEqual(now, old);
     const rejoin = await M.c.post('/api/family/join', { code: old });
     assert.equal(rejoin.status, 400, 'removed member + stale code = denied');
     assert.equal((await M.c.get(`/api/family/${fam.id}`)).status, 403);
-    assert.equal(ownerRows(fam.id).length, 1);
+    assert.equal((await ownerRows(fam.id)).length, 1);
   });
 
   await t.test('F-03 start-up hardening (real process restart): legacy 8-character codes replaced (Hardening 1.5 widened this from DEMO-only), 12-character codes untouched, ownerless family repaired, at-most-one-owner index in place', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'la-h1-'));
     const dbPath = path.join(dir, 'legacy.db');
     const root = path.join(__dirname, '..');
-    const run = (script) => execFileSync(process.execPath, ['-e', script], { cwd: root, env: { ...process.env, LIFEADMIN_DB_PATH: dbPath, NODE_ENV: 'test' }, encoding: 'utf8' }).trim();
-    // 1st start creates the schema; then we plant legacy states directly.
-    run("require('./src/db')");
-    const { DatabaseSync } = require('node:sqlite');
-    const raw = new DatabaseSync(dbPath);
-    raw.exec('DROP INDEX IF EXISTS idx_family_one_owner');
-    const mkUser = (n) => raw.prepare("INSERT INTO users (first_name,last_name,email,phone,password_hash) VALUES ('U','x',?,?,'h')").run(`u${n}@x.test`, `+3830000000${n}`).lastInsertRowid;
-    const u1 = mkUser(1), u2 = mkUser(2), u3 = mkUser(3);
-    const fam = (code, owner) => raw.prepare('INSERT INTO families (name, invite_code, owner_id) VALUES (?,?,?)').run('F', code, owner).lastInsertRowid;
-    const fDemo = fam('DEMO4821', u1), fOld = fam('A1B2C3D4', u2), fOrphan = fam('ORPHANCODE12', u3), fGone = fam('GONECODE0001', u1);
-    const mem = (f, u, role) => raw.prepare('INSERT INTO family_members (family_id,user_id,role) VALUES (?,?,?)').run(f, u, role);
-    mem(fDemo, u1, 'owner'); mem(fOld, u2, 'owner');
-    mem(fOrphan, u3, 'member');           // recorded owner demoted himself through the old endpoint
-    mem(fGone, u2, 'member');             // recorded owner (u1) is NOT a member at all: must not promote u2
-    raw.close();
+    // Each step is a process of its own on the same database folder, one at a time.
+    const step = (script, env = {}) => {
+      const out = execFileSync(process.execPath, ['-e', `(async () => { const db = require('./src/db'); ${script}; await db.close(); })().catch((e) => { console.log(JSON.stringify({ error: e.message })); process.exit(0); });`], { cwd: root, env: { ...process.env, LIFEADMIN_DB_PATH: dbPath, NODE_ENV: 'test', ...env }, encoding: 'utf8' }).trim();
+      return JSON.parse(out.split('\n').pop() || 'null');
+    };
+    // 1st start creates the schema; then the legacy states are planted without the hardening running.
+    step("await db.ready(); console.log('null')");
+    const planted = step(`
+      await db.exec('DROP INDEX IF EXISTS idx_family_one_owner');
+      const mkUser = async (n) => (await db.run("INSERT INTO users (first_name,last_name,email,phone,password_hash) VALUES ('U','x',?,?,'h')", ['u' + n + '@x.test', '+3830000000' + n])).lastInsertRowid;
+      const u1 = await mkUser(1), u2 = await mkUser(2), u3 = await mkUser(3);
+      const fam = async (code, owner) => (await db.run('INSERT INTO families (name, invite_code, owner_id) VALUES (?,?,?)', ['F', code, owner])).lastInsertRowid;
+      const fDemo = await fam('DEMO4821', u1), fOld = await fam('A1B2C3D4', u2), fOrphan = await fam('ORPHANCODE12', u3), fGone = await fam('GONECODE0001', u1);
+      const mem = (f, u, role) => db.run('INSERT INTO family_members (family_id,user_id,role) VALUES (?,?,?)', [f, u, role]);
+      await mem(fDemo, u1, 'owner'); await mem(fOld, u2, 'owner');
+      await mem(fOrphan, u3, 'member');
+      await mem(fGone, u2, 'member');
+      console.log(JSON.stringify({ u1, u2, u3, fDemo, fOld, fOrphan, fGone }))`, { DB_SKIP_SCHEMA: '1' });
+    const { u2, u3, fDemo, fOld, fOrphan, fGone } = planted;
     // 2nd start = the hardening pass
-    const out = JSON.parse(run(`const db=require('./src/db'); const g=(s,p=[])=>db.all(s,p);
-      console.log(JSON.stringify({codes:g('SELECT id,invite_code FROM families ORDER BY id'), roles:g('SELECT family_id,user_id,role FROM family_members ORDER BY id'), idx:g("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_family_one_owner'")}))`).split('\n').pop());
+    const read = "console.log(JSON.stringify({codes: await db.all('SELECT id,invite_code FROM families ORDER BY id'), roles: await db.all('SELECT family_id,user_id,role FROM family_members ORDER BY id'), idx: await db.all(\"SELECT indexname AS name FROM pg_indexes WHERE indexname = 'idx_family_one_owner'\")}))";
+    const out = step(read);
     const code = (id) => out.codes.find((c) => c.id === Number(id)).invite_code;
     assert.match(code(fDemo), CODE_RE, 'DEMO#### replaced by a strong code');
     assert.match(code(fOld), CODE_RE, 'a legacy 8-hex code is replaced too');
@@ -274,12 +278,11 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal(role(fGone, u2), 'member', 'nobody else is ever promoted');
     assert.equal(out.idx.length, 1, 'unique-owner index exists');
     // a third start changes nothing (idempotent)
-    const again = JSON.parse(run(`const db=require('./src/db'); console.log(JSON.stringify(db.all('SELECT id,invite_code FROM families ORDER BY id')))`).split('\n').pop());
-    assert.deepEqual(again.map((c) => c.invite_code), out.codes.map((c) => c.invite_code));
+    const again = step(read);
+    assert.deepEqual(again.codes.map((c) => c.invite_code), out.codes.map((c) => c.invite_code));
     // and the index really prevents a second owner row
-    const raw2 = new DatabaseSync(dbPath);
-    assert.throws(() => raw2.prepare("INSERT INTO family_members (family_id,user_id,role) VALUES (?,?, 'owner')").run(fDemo, u2), /UNIQUE|constraint/i);
-    raw2.close();
+    const refused = step(`await db.run("INSERT INTO family_members (family_id,user_id,role) VALUES (?,?, 'owner')", [${Number(fDemo)}, ${Number(u2)}]); console.log(JSON.stringify({ error: null }))`, { DB_SKIP_SCHEMA: '1' });
+    assert.match(String(refused.error), /unique|constraint/i);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -321,10 +324,10 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.ok(/SECRET-COMMENT by owner/.test(await everything(M)), 'assignee is notified of the owner\'s comment');
     assert.ok(/SECRET-COMMENT/.test(JSON.stringify((await O.c.get('/api/search?q=SECRET-COMMENT')).data.results)), 'owner can search comments on own task');
     // nothing was deleted
-    assert.equal(db.get('SELECT COUNT(*) c FROM task_comments WHERE task_id = ?', [priv.id]).c, 2);
-    assert.equal(db.get('SELECT visibility FROM tasks WHERE id = ?', [priv.id]).visibility, 'private');
+    assert.equal((await db.get('SELECT COUNT(*) c FROM task_comments WHERE task_id = ?', [priv.id])).c, 2);
+    assert.equal((await db.get('SELECT visibility FROM tasks WHERE id = ?', [priv.id])).visibility, 'private');
     // private activity is not attached to the family at write time either
-    assert.equal(db.get("SELECT COUNT(*) c FROM activity_log WHERE link = ? AND family_id IS NOT NULL", [`#/tasks/${priv.id}`]).c, 0);
+    assert.equal((await db.get("SELECT COUNT(*) c FROM activity_log WHERE link = ? AND family_id IS NOT NULL", [`#/tasks/${priv.id}`])).c, 0);
   });
 
   await t.test('F-04 family-visible tasks keep working exactly as before (feed, timeline, dashboard, search, notifications)', async () => {
@@ -347,16 +350,16 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     await O.c.patch(`/api/tasks/${tsk.id}`, { visibility: 'private' });
     assert.ok(!(await feed(M2, fam.id)).some((s) => /WAS-SHARED/.test(s)), 'hidden once private');
     assert.ok(!(await M2.c.get('/api/timeline')).data.activity.some((a) => /WAS-SHARED/.test(a.summary)));
-    assert.equal(db.get("SELECT COUNT(*) c FROM activity_log WHERE link = ?", [`#/tasks/${tsk.id}`]).c >= 1, true, 'the log rows still exist');
+    assert.equal((await db.get("SELECT COUNT(*) c FROM activity_log WHERE link = ?", [`#/tasks/${tsk.id}`])).c >= 1, true, 'the log rows still exist');
     // a private task whose activity was written with family_id by the old code
     const legacyTask = (await O.c.post('/api/tasks', { title: 'LEGACY-PRIVATE' })).data.task;
-    db.run("UPDATE tasks SET family_id = ? WHERE id = ?", [fam.id, legacyTask.id]);
-    db.run("INSERT INTO activity_log (user_id, family_id, type, summary, link) VALUES (?, ?, 'task_created', 'legacy row LEGACY-PRIVATE', ?)", [O.id, fam.id, `#/tasks/${legacyTask.id}`]);
+    await db.run("UPDATE tasks SET family_id = ? WHERE id = ?", [fam.id, legacyTask.id]);
+    await db.run("INSERT INTO activity_log (user_id, family_id, type, summary, link) VALUES (?, ?, 'task_created', 'legacy row LEGACY-PRIVATE', ?)", [O.id, fam.id, `#/tasks/${legacyTask.id}`]);
     assert.ok(!(await feed(M2, fam.id)).some((s) => /LEGACY-PRIVATE/.test(s)));
     assert.ok(!(await M2.c.get('/api/dashboard')).data.familyActivity.some((a) => /LEGACY-PRIVATE/.test(a.summary)));
     assert.ok((await O.c.get('/api/timeline')).data.activity.some((a) => /LEGACY-PRIVATE/.test(a.summary)), 'the author still sees own activity in own Timeline');
     // fail closed on an unexpected visibility value
-    db.run("UPDATE tasks SET visibility = 'weird' WHERE id = ?", [tsk.id]);
+    await db.run("UPDATE tasks SET visibility = 'weird' WHERE id = ?", [tsk.id]);
     assert.ok(!(await feed(M2, fam.id)).some((s) => /WAS-SHARED/.test(s)));
   });
 
@@ -388,16 +391,16 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     const otherFam = await makeFamily(X);
     assert.equal((await O.c.patch(`/api/family/${fam.id}/members/${memberRow(otherFam, X.id).id}`, { role: 'member' })).status, 404, 'a row of another family cannot be reached through this family');
     assert.equal(memberRow((await X.c.get(`/api/family/${otherFam.id}`)).data.family, X.id).role, 'owner');
-    assert.equal(ownerRows(fam.id).length, 1);
-    assert.equal(ownerRows(fam.id)[0].user_id, O.id);
-    assert.equal(db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id]).owner_id, O.id);
+    assert.equal((await ownerRows(fam.id)).length, 1);
+    assert.equal((await ownerRows(fam.id))[0].user_id, O.id);
+    assert.equal((await db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id])).owner_id, O.id);
     // ordinary role management still works for non-owners
     assert.equal((await O.c.patch(`/api/family/${fam.id}/members/${memberRow(fam, M.id).id}`, { role: 'admin' })).status, 200);
     assert.equal((await O.c.patch(`/api/family/${fam.id}/members/${memberRow(fam, M.id).id}`, { role: 'member' })).status, 200);
     // and the family is still recoverable through the explicit transfer
     assert.equal((await O.c.post(`/api/family/${fam.id}/transfer-ownership`, { memberId: memberRow(fam, M.id).id })).status, 200);
-    assert.equal(ownerRows(fam.id).length, 1);
-    assert.equal(ownerRows(fam.id)[0].user_id, M.id);
+    assert.equal((await ownerRows(fam.id)).length, 1);
+    assert.equal((await ownerRows(fam.id))[0].user_id, M.id);
   });
 
   await t.test('F-13 sole owner: cannot self-demote, cannot leave, cannot transfer, cannot delete the account', async () => {
@@ -408,24 +411,24 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await S.c.post(`/api/family/${fam.id}/leave`, {})).status, 400);
     assert.equal((await S.c.post(`/api/family/${fam.id}/transfer-ownership`, { memberId: own.id })).status, 400);
     assert.equal((await S.c.del('/api/settings/account', { password: S.payload.password })).status, 400);
-    assert.equal(ownerRows(fam.id).length, 1);
+    assert.equal((await ownerRows(fam.id)).length, 1);
   });
 
   await t.test('F-13 the database refuses a second owner row; a transfer that fails half-way rolls back to exactly one owner', async () => {
     const O = await newUser(), M = await newUser();
     const fam = await makeFamily(O, M);
-    assert.throws(() => db.run("UPDATE family_members SET role = 'owner' WHERE id = ?", [memberRow(fam, M.id).id]), /UNIQUE|constraint/i);
-    db.db.exec("CREATE TRIGGER h1_boom BEFORE UPDATE OF role ON family_members WHEN NEW.role = 'owner' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END;");
+    await assert.rejects(async () => db.run("UPDATE family_members SET role = 'owner' WHERE id = ?", [(await memberRow(fam, M.id)).id]), /UNIQUE|constraint/i);
+    await db.exec("CREATE FUNCTION h1_boom_fn() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN IF NEW.role = 'owner' THEN RAISE EXCEPTION 'simulated failure'; END IF; RETURN NEW; END $f$; CREATE TRIGGER h1_boom BEFORE UPDATE OF role ON family_members FOR EACH ROW EXECUTE FUNCTION h1_boom_fn();");
     try {
       const r = await O.c.post(`/api/family/${fam.id}/transfer-ownership`, { memberId: memberRow(fam, M.id).id });
       assert.equal(r.status, 500);
     } finally {
-      db.db.exec('DROP TRIGGER h1_boom');
+      await db.exec('DROP TRIGGER h1_boom ON family_members; DROP FUNCTION h1_boom_fn();');
     }
-    assert.equal(ownerRows(fam.id).length, 1);
-    assert.equal(ownerRows(fam.id)[0].user_id, O.id, 'rolled back');
-    assert.equal(db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id]).owner_id, O.id);
-    assert.equal(db.get('SELECT role FROM family_members WHERE id = ?', [memberRow(fam, M.id).id]).role, 'member');
+    assert.equal((await ownerRows(fam.id)).length, 1);
+    assert.equal((await ownerRows(fam.id))[0].user_id, O.id, 'rolled back');
+    assert.equal((await db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id])).owner_id, O.id);
+    assert.equal((await db.get('SELECT role FROM family_members WHERE id = ?', [memberRow(fam, M.id).id])).role, 'member');
   });
 
   await t.test('F-13 conflicting concurrent operations always end with exactly one owner that matches families.owner_id', async () => {
@@ -440,9 +443,9 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
       ]);
       const wins = results.slice(0, 2).filter((r) => r.status === 200);
       assert.equal(wins.length, 1, `exactly one transfer wins (round ${round}): ${results.map((r) => r.status)}`);
-      const owners = ownerRows(fam.id);
+      const owners = await ownerRows(fam.id);
       assert.equal(owners.length, 1);
-      assert.equal(db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id]).owner_id, owners[0].user_id);
+      assert.equal((await db.get('SELECT owner_id FROM families WHERE id = ?', [fam.id])).owner_id, owners[0].user_id);
       assert.ok([M.id, N.id].includes(owners[0].user_id));
     }
   });
@@ -455,8 +458,9 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await A.c.del('/api/settings/account', { password: A.payload.password })).status, 200);
     const after = (await B.c.get(`/api/family/${fam.id}`)).data.family;
     assert.equal(after.members.length, 2);
-    assert.equal(ownerRows(fam.id).length, 1);
+    assert.equal((await ownerRows(fam.id)).length, 1);
     assert.equal(after.ownerId, B.id);
-    assert.deepEqual(db.all('PRAGMA foreign_key_check'), []);
+    // PostgreSQL checks every reference as it is written; what can still be looked for is a row left without its parent.
+    assert.deepEqual(await db.all('SELECT m.id FROM family_members m LEFT JOIN families f ON f.id = m.family_id WHERE f.id IS NULL'), []);
   });
 });

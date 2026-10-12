@@ -40,7 +40,7 @@ test('account recovery + auth hardening', async (t) => {
     const req = await c.post('/api/auth/verify/email/request', {});
     const code = req.data.demoCode;
     const past = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    db.run("UPDATE otp_codes SET expires_at = ? WHERE code = ?", [past, code]);
+    await db.run("UPDATE otp_codes SET expires_at = ? WHERE code = ?", [past, code]);
     const res = await c.post('/api/auth/verify/email/confirm', { code });
     assert.equal(res.status, 400, 'an expired verification code must not be accepted');
   });
@@ -62,7 +62,7 @@ test('account recovery + auth hardening', async (t) => {
     const { payload } = await newUser();
     const { token } = await requestReset(payload.email);
     assert.ok(token && token.length >= 43, 'base64url of 32 random bytes is 43 chars');
-    const rows = db.all('SELECT * FROM password_reset_tokens');
+    const rows = await db.all('SELECT * FROM password_reset_tokens');
     assert.equal(JSON.stringify(rows).includes(token), false, 'raw token must not be persisted');
     const row = rows.find((r) => r.token_hash === crypto.createHash('sha256').update(token).digest('hex'));
     assert.ok(row, 'the SHA-256 hash of the token is stored');
@@ -104,7 +104,7 @@ test('account recovery + auth hardening', async (t) => {
   await t.test('expired, malformed, and unknown tokens all fail with the same generic message', async () => {
     const { payload } = await newUser();
     const { token } = await requestReset(payload.email);
-    db.run('UPDATE password_reset_tokens SET expires_at = ?', [Date.now() - 1000]);
+    await db.run('UPDATE password_reset_tokens SET expires_at = ?', [Date.now() - 1000]);
     const anon = makeClient(app.base);
     const expired = await anon.post('/api/auth/reset-password', { token, password: 'expired-pass-11', confirmPassword: 'expired-pass-11' });
     assert.equal(expired.status, 400);
@@ -204,7 +204,7 @@ test('account recovery + auth hardening', async (t) => {
     const prev = { env: process.env.NODE_ENV, base: process.env.APP_BASE_URL, mt: process.env.MAIL_TRANSPORT };
     process.env.NODE_ENV = 'production';
     process.env.MAIL_TRANSPORT = 'outbox'; // only so a send would be observable
-    const before = db.get('SELECT COUNT(*) c FROM password_reset_tokens').c;
+    const before = (await db.get('SELECT COUNT(*) c FROM password_reset_tokens')).c;
     try {
       delete process.env.APP_BASE_URL;
       assert.equal((await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email })).status, 200);
@@ -212,7 +212,7 @@ test('account recovery + auth hardening', async (t) => {
       resetAllLimits();
       assert.equal((await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email })).status, 200);
       assert.equal(mailer.getOutbox().length, 0, 'no email without a valid https APP_BASE_URL in production');
-      assert.equal(db.get('SELECT COUNT(*) c FROM password_reset_tokens').c, before, 'no token is even created');
+      assert.equal((await db.get('SELECT COUNT(*) c FROM password_reset_tokens')).c, before, 'no token is even created');
 
       process.env.APP_BASE_URL = 'https://app.example.test/';
       resetAllLimits();
@@ -294,9 +294,9 @@ test('account recovery + auth hardening', async (t) => {
 
     const { c: c2, payload: p2 } = await newUser();
     await requestReset(p2.email);
-    const uid = db.get('SELECT id FROM users WHERE email = ?', [p2.email.toLowerCase()]).id;
+    const uid = (await db.get('SELECT id FROM users WHERE email = ?', [p2.email.toLowerCase()])).id;
     assert.equal((await c2.del('/api/settings/account', { password: p2.password })).status, 200);
-    assert.equal(db.get('SELECT COUNT(*) c FROM password_reset_tokens WHERE user_id = ?', [uid]).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) c FROM password_reset_tokens WHERE user_id = ?', [uid])).c, 0);
   });
 
   // --- authorization (IDOR) matrix --------------------------------------------

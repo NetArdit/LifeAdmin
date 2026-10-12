@@ -40,7 +40,7 @@ router.post(
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedPhone = normalizePhone(phone);
 
-    const existing = db.get('SELECT id FROM users WHERE email = ? OR phone = ?', [normalizedEmail, normalizedPhone]);
+    const existing = await db.get('SELECT id FROM users WHERE email = ? OR phone = ?', [normalizedEmail, normalizedPhone]);
     if (existing) {
       throw new ValidationError('An account with this email or phone already exists.', {
         email: 'Already in use',
@@ -48,15 +48,15 @@ router.post(
     }
 
     const hash = await hashPassword(password);
-    const result = db.run(
+    const result = await db.run(
       `INSERT INTO users (first_name, last_name, email, phone, password_hash) VALUES (?, ?, ?, ?, ?)`,
       [firstName.trim(), lastName.trim(), normalizedEmail, normalizedPhone, hash]
     );
 
-    const session = createSession(result.lastInsertRowid);
+    const session = await createSession(result.lastInsertRowid);
     setSessionCookie(res, session);
 
-    const user = db.get('SELECT * FROM users WHERE id = ?', [result.lastInsertRowid]);
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({ user: publicUser(user) });
   })
 );
@@ -72,7 +72,7 @@ router.post(
     const limitKey = `${req.ip}|${idNorm}`;
     if (limits.loginFail.isLimited(limitKey)) return tooMany(res, limits.loginFail, limitKey);
 
-    const user = db.get('SELECT * FROM users WHERE email = ? OR phone = ?', [idNorm, idNorm]);
+    const user = await db.get('SELECT * FROM users WHERE email = ? OR phone = ?', [idNorm, idNorm]);
     // Always run one bcrypt comparison (against a dummy hash when the account
     // doesn't exist) so an unknown identifier isn't distinguishable by timing.
     const valid = await verifyPassword(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
@@ -82,7 +82,7 @@ router.post(
     }
     limits.loginFail.reset(limitKey);
 
-    const session = createSession(user.id);
+    const session = await createSession(user.id);
     setSessionCookie(res, session);
     res.json({ user: publicUser(user) });
   })
@@ -118,7 +118,7 @@ router.post(
   '/reset-password/check',
   asyncRoute(async (req, res) => {
     if (limits.reset.consume(req.ip)) return tooMany(res, limits.reset, req.ip);
-    const row = findValidResetToken(req.body && req.body.token);
+    const row = await findValidResetToken(req.body && req.body.token);
     if (!row) throw new ValidationError(RESET_INVALID_MESSAGE);
     res.json({ ok: true });
   })
@@ -135,28 +135,28 @@ router.post(
     if (password !== confirmPassword) fields.confirmPassword = 'Passwords do not match.';
     if (Object.keys(fields).length) throw new ValidationError('Please fix the highlighted fields.', fields);
 
-    const row = findValidResetToken(token);
+    const row = await findValidResetToken(token);
     if (!row) throw new ValidationError(RESET_INVALID_MESSAGE);
 
     const hash = await hashPassword(password);
-    db.tx(() => {
+    await db.tx(async () => {
       // Re-check inside the transaction: the token may have been used by a
       // concurrent request while the password was being hashed.
-      const fresh = db.get('SELECT used_at FROM password_reset_tokens WHERE id = ?', [row.id]);
+      const fresh = await db.get('SELECT used_at FROM password_reset_tokens WHERE id = ?', [row.id]);
       if (!fresh || fresh.used_at) throw new ValidationError(RESET_INVALID_MESSAGE);
       const now = Date.now();
-      db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [hash, row.user_id]);
-      db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [now, row.user_id]);
-      deleteSessionsForUser(row.user_id);
+      await db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [hash, row.user_id]);
+      await db.run('UPDATE password_reset_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL', [now, row.user_id]);
+      await deleteSessionsForUser(row.user_id);
     });
     clearSessionCookie(res);
     res.json({ ok: true });
   })
 );
 
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   const sid = req.cookies ? req.cookies[SESSION_COOKIE] : null;
-  if (sid) destroySession(sid);
+  if (sid) await destroySession(sid);
   clearSessionCookie(res);
   res.json({ ok: true });
 });
@@ -172,10 +172,10 @@ router.get('/me', (req, res) => {
 // it, returns it directly in the API response with demoMode:true so the
 // verification FLOW can be tested end-to-end locally, for free, without
 // ever claiming a message was actually delivered.
-function issueOtp(userId, channel) {
+async function issueOtp(userId, channel) {
   const code = String(crypto.randomInt(100000, 999999));
   const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  db.run(
+  await db.run(
     `INSERT INTO otp_codes (user_id, channel, code, purpose, expires_at) VALUES (?, ?, ?, 'verify', ?)`,
     [userId, channel, code, expires]
   );
@@ -189,7 +189,7 @@ router.post(
     if (!req.user) return res.status(401).json({ error: 'Not authenticated.' });
     if (!['phone', 'email'].includes(channel)) throw new ValidationError('Invalid channel.');
 
-    const code = issueOtp(req.user.id, channel);
+    const code = await issueOtp(req.user.id, channel);
     res.json({
       ok: true,
       demoMode: true,
@@ -215,7 +215,7 @@ router.post(
     const otpKey = `otp|${req.user.id}`;
     if (limits.otpConfirm.isLimited(otpKey)) return tooMany(res, limits.otpConfirm, otpKey);
 
-    const otp = db.get(
+    const otp = await db.get(
       // expires_at is stored as an ISO-8601 string (toISOString), so compare
       // against an ISO string too — comparing to SQLite's datetime('now')
       // ("YYYY-MM-DD HH:MM:SS") mis-orders same-day values ('T' > ' ') and
@@ -229,11 +229,11 @@ router.post(
       throw new ValidationError('That code is invalid or has expired.');
     }
 
-    db.run('UPDATE otp_codes SET consumed_at = datetime(\'now\') WHERE id = ?', [otp.id]);
+    await db.run('UPDATE otp_codes SET consumed_at = datetime(\'now\') WHERE id = ?', [otp.id]);
     const column = channel === 'phone' ? 'phone_verified' : 'email_verified';
-    db.run(`UPDATE users SET ${column} = 1, updated_at = datetime('now') WHERE id = ?`, [req.user.id]);
+    await db.run(`UPDATE users SET ${column} = 1, updated_at = datetime('now') WHERE id = ?`, [req.user.id]);
 
-    const user = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
     res.json({ ok: true, user: publicUser(user) });
   })
 );
