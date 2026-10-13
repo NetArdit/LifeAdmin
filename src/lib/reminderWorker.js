@@ -118,8 +118,12 @@ async function handle(row, token, { now = Date.now(), deliver = deliverToBell } 
   }
 }
 
-/** What the clock also tidies: sessions that ran out, and with them the devices that were bound to them. */
+/**
+ * What the clock also tidies: sessions that ran out (and with them the devices that were bound to them),
+ * and the counts of limits whose window is over. Answers how many sessions ended.
+ */
 async function housekeeping() {
+  await db.run('DELETE FROM rate_limits WHERE expires_at <= ?', [Date.now()]);
   return (await db.run("DELETE FROM sessions WHERE expires_at <= datetime('now')")).changes;
 }
 

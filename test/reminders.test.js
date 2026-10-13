@@ -404,5 +404,12 @@ test('reminders: quiet hours move a reminder to their end, never drop it', () =>
   // The choices are checked like the others.
   assert.deepEqual(r.parsePrefs({ quietOn: false, quietStart: '21:00', quietEnd: '07:00' }), { quietOn: false, quietStart: '21:00', quietEnd: '07:00' });
   assert.throws(() => r.parsePrefs({ quietOn: 'yes' }), { name: 'ValidationError' });
+  assert.deepEqual(r.parsePrefs({ quietCircles: false }), { quietCircles: false });
+  assert.throws(() => r.parsePrefs({ quietCircles: 1 }), { name: 'ValidationError' });
+  assert.equal(r.prefsOf({ reminder_prefs: '{}' }).quietCircles, false);
+  assert.equal(r.prefsOf({ reminder_prefs: '{"quietCircles":true}' }).quietCircles, true);
+  assert.equal(r.inQuietHours(at('2026-07-15', '23:30'), prefs, zone), true);
+  assert.equal(r.inQuietHours(at('2026-07-15', '12:00'), prefs, zone), false);
+  assert.equal(r.inQuietHours(at('2026-07-15', '23:30'), { ...prefs, quietOn: false }, zone), false);
   assert.throws(() => r.parsePrefs({ quietStart: '25:00' }), { name: 'ValidationError' });
 });

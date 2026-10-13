@@ -24,6 +24,14 @@ test('notifications on devices: circle events and reminders', async (t) => {
   const db = require('../src/db');
   const push = require('../src/lib/push');
   const worker = require('../src/lib/reminderWorker');
+  const notify = require('../src/lib/notify');
+  // Midday in Kosovo, whatever the hour the suite runs at: quiet hours must not decide the other tests.
+  const MIDDAY = Date.parse('2026-07-15T10:00:00Z');
+  const NIGHT = Date.parse('2026-07-15T00:30:00Z'); // 02:30 there
+  const restoreClock = notify.setClock(() => MIDDAY);
+  t.after(() => notify.setClock(restoreClock));
+  const pushOf = async (userId) => db.get('SELECT id, push_status, push_attempts, push_retry_at FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]);
+  const due = (id) => db.run("UPDATE notifications SET push_retry_at = '2000-01-01 00:00:00' WHERE id = ?", [id]);
 
   // Every push that would have left, with whose device it was for.
   const sent = [];
@@ -36,6 +44,7 @@ test('notifications on devices: circle events and reminders', async (t) => {
   t.beforeEach(() => {
     sent.length = 0;
     fail = false;
+    notify.setClock(() => MIDDAY);
   });
 
   async function person(name) {
@@ -153,13 +162,105 @@ test('notifications on devices: circle events and reminders', async (t) => {
     assert.equal((await stranger.c.post(`/api/family/${family.id}/mute`, { hours: 8 })).status, 403);
   });
 
-  await t.test('a push service that is down never fails the message; the bell row says the device was not reached', async () => {
-    const { arta, besnik, family } = await circle();
+  await t.test('a push service that is down never fails the message; the push stays owed and the clock sends it once the service is back', async () => {
+    const { arta, besnik, drita, family } = await circle();
     fail = true;
     const res = await arta.c.post(`/api/chat/${family.id}/messages`, { body: 'Shërbimi ka rënë' });
     assert.equal(res.status, 201);
-    assert.deepEqual((await bells(besnik.id, 'chat')).map((b) => b.push_status), ['failed']);
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM messages WHERE family_id = ?', [family.id])).c, 1);
+    const owed = await pushOf(besnik.id);
+    assert.equal(owed.push_status, 'pending');
+    assert.equal(owed.push_attempts, 1);
+    assert.ok(owed.push_retry_at, 'nobody tries it again at once');
+
+    // Too early: the row is still held by the attempt that failed.
+    fail = false;
+    assert.equal((await notify.retryPushes()).tried, 0);
+    assert.equal(sent.length, 0);
+
+    // The two minutes are over.
+    await due(owed.id);
+    await due((await pushOf(drita.id)).id);
+    const out = await notify.retryPushes();
+    assert.equal(out.tried, 2);
+    assert.equal(out.sent, 2);
+    assert.deepEqual(reached(), [besnik.endpoint, drita.endpoint].sort());
+    assert.equal((await pushOf(besnik.id)).push_status, 'sent');
+    // And only once.
+    assert.equal((await notify.retryPushes()).tried, 0);
+    assert.equal(sent.length, 2);
+  });
+
+  await t.test('a push is tried three times and then given up; a message that is no longer news is closed unsent', async () => {
+    const { arta, besnik, drita, family } = await circle();
+    fail = true;
+    await arta.c.post(`/api/chat/${family.id}/messages`, { body: 'Tri herë' });
+    const owed = await pushOf(besnik.id);
+    await due(owed.id);
+    assert.equal(await notify.deliverPush(owed.id), 'retry');
+    await due(owed.id);
+    assert.equal(await notify.deliverPush(owed.id), 'failed');
+    assert.deepEqual([(await pushOf(besnik.id)).push_status, (await pushOf(besnik.id)).push_attempts], ['failed', notify.MAX_PUSH_ATTEMPTS]);
+    assert.equal(await notify.deliverPush(owed.id), null, 'what is closed is not tried again');
+
+    // Drita's is still owed, and by now forty minutes old.
+    fail = false;
+    const old = await pushOf(drita.id);
+    await db.run("UPDATE notifications SET created_at = datetime('now', '-40 minutes'), push_retry_at = NULL WHERE id = ?", [old.id]);
+    const out = await notify.retryPushes();
+    assert.equal(out.expired, 1);
+    assert.equal(sent.length, 0);
+    assert.equal((await pushOf(drita.id)).push_status, 'expired');
+  });
+
+  await t.test('a push that was never attempted (the server stopped after storing the event) is sent by the clock; two attempts at once send one', async () => {
+    const { besnik, family } = await circle();
+    const insert = () => db.run("INSERT INTO notifications (user_id, type, title, link, family_id, push_status) VALUES (?, 'chat', 'Arta sent a message', '#/family/chat', ?, 'pending')", [besnik.id, family.id]);
+    await insert();
+    const out = await notify.retryPushes();
+    assert.deepEqual([out.tried, out.sent], [1, 1]);
+    assert.deepEqual(reached(), [besnik.endpoint]);
+
+    sent.length = 0;
+    const id = (await insert()).lastInsertRowid;
+    const both = await Promise.all([notify.deliverPush(id), notify.deliverPush(id)]);
+    assert.deepEqual(both.sort(), [null, 'sent'].sort());
+    assert.equal(sent.length, 1);
+  });
+
+  await t.test('somebody who left the circle before the push went out is not told', async () => {
+    const { arta, besnik, family } = await circle();
+    fail = true;
+    await arta.c.post(`/api/chat/${family.id}/messages`, { body: 'Para largimit' });
+    const owed = await pushOf(besnik.id);
+    assert.equal((await besnik.c.post(`/api/family/${family.id}/leave`, {})).status, 200);
+    fail = false;
+    await due(owed.id);
+    assert.equal(await notify.deliverPush(owed.id), 'left');
+    assert.ok(!reached().includes(besnik.endpoint));
+  });
+
+  await t.test('a circle is told at once at night too; for somebody who chose quiet circles the bell fills and the device stays silent, and nothing is sent in the morning', async () => {
+    const { arta, besnik, drita, family } = await circle();
+    // Drita changed nothing: the default. Besnik chose quiet circles.
+    assert.equal((await besnik.c.patch('/api/settings/reminders', { defaults: { quietCircles: true } })).status, 200);
+    notify.setClock(() => NIGHT);
+    assert.equal((await arta.c.post(`/api/chat/${family.id}/messages`, { body: 'Në orën dy e gjysmë' })).status, 201);
+    assert.deepEqual(reached(), [drita.endpoint]);
+    const bell = await bells(besnik.id, 'chat');
+    assert.deepEqual(bell.map((b) => [b.body, b.push_status]), [['Në orën dy e gjysmë', 'quiet']]);
+
+    // Morning: what was kept quiet is not owed any more.
+    notify.setClock(() => MIDDAY);
+    sent.length = 0;
+    assert.equal((await notify.retryPushes()).tried, 0);
+    assert.equal(sent.length, 0);
+
+    // With quiet hours switched off altogether, the night is like the day.
+    assert.equal((await besnik.c.patch('/api/settings/reminders', { defaults: { quietOn: false } })).status, 200);
+    notify.setClock(() => NIGHT);
+    await arta.c.post(`/api/chat/${family.id}/messages`, { body: 'Pa orë të qeta' });
+    assert.deepEqual(reached(), [besnik.endpoint, drita.endpoint].sort());
   });
 
   await t.test('a reminder that is due reaches the device once, as a reminder, after its bell row is stored', async () => {
@@ -183,7 +284,9 @@ test('notifications on devices: circle events and reminders', async (t) => {
     fail = true;
     const out = await worker.runDue({ now: Date.parse(row.scheduled_at) + 1000 });
     assert.equal(out.sent, 1, 'the reminder is delivered to the bell; the device is extra');
-    assert.deepEqual((await db.all("SELECT push_status FROM notifications WHERE user_id = ? AND title LIKE 'Reminder%'", [me.id])).map((b) => b.push_status), ['failed']);
+    assert.deepEqual((await db.all("SELECT push_status, push_attempts FROM notifications WHERE user_id = ? AND title LIKE 'Reminder%'", [me.id])).map((b) => [b.push_status, b.push_attempts]), [['pending', 1]]);
+    // The reminder itself is done: the clock does not write a second bell row. Only the push is owed.
     assert.equal((await worker.runDue({ now: Date.parse(row.scheduled_at) + 900000 })).claimed, 0);
+    assert.equal((await db.get("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND title LIKE 'Reminder%'", [me.id])).c, 1);
   });
 });

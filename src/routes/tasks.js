@@ -470,7 +470,7 @@ router.delete(
 // --- Comments --------------------------------------------------------------
 router.post(
   '/:id/comments',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
     const body = req.body && req.body.body;

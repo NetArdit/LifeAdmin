@@ -44,9 +44,10 @@ test('backup and restore', async (t) => {
 
   await t.test('is refused by a database that already has data, and by anything that is not a backup', async () => {
     await assert.rejects(restoreBackup(backup), /not empty/);
-    for (const bad of [null, {}, { app: 'other', format: 1, tables: {} }, { app: 'lifeadmin', format: 99, tables: {} }, { app: 'lifeadmin', format: 1, tables: { 'users; DROP TABLE users': [] } }]) {
+    for (const bad of [null, {}, { ...backup, app: 'other' }, { ...backup, format: 99 }, { ...backup, shape: undefined }, { ...backup, tables: { 'users; DROP TABLE users': [] } }]) {
       assert.throws(() => checkBackup(bad));
     }
+    assert.equal(checkBackup(backup), backup);
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM users')).c, 2);
   });
 
@@ -92,6 +93,19 @@ test('backup and restore', async (t) => {
     assert.ok(after.planned >= 1, 'the planned reminders came back');
     assert.ok(after.nextId > after.maxBefore);
 
+    // A backup of another shape (a table missing, a column missing: an older version's) is refused whole,
+    // by name, before anything is written.
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'la-restore-old-'));
+    const emptyEnv = { ...env, LIFEADMIN_DB_PATH: path.join(emptyDir, 'db') };
+    const older = JSON.parse(JSON.stringify(backup));
+    delete older.tables.bills;
+    delete older.shape.bills;
+    older.shape.tasks = older.shape.tasks.filter((c) => c !== 'title');
+    const olderFile = path.join(emptyDir, 'older.json');
+    fs.writeFileSync(olderFile, JSON.stringify(older));
+    assert.throws(() => execFileSync(process.execPath, ['scripts/backup.cjs', 'restore', olderFile], { cwd: root, env: emptyEnv, encoding: 'utf8', stdio: 'pipe' }), /another version[\s\S]*bills, tasks/);
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+
     // A second restore into the same, now filled, database is refused.
     assert.throws(() => execFileSync(process.execPath, ['scripts/backup.cjs', 'restore', file], { cwd: root, env, encoding: 'utf8', stdio: 'pipe' }), /not empty/);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -104,6 +118,11 @@ test('backup and restore', async (t) => {
     const env = { ...process.env, LIFEADMIN_DB_PATH: path.join(dir, 'db'), NODE_ENV: 'test', DATABASE_URL: '' };
     assert.throws(() => execFileSync(process.execPath, ['scripts/backup.cjs', 'backup', file], { cwd: path.join(__dirname, '..'), env, encoding: 'utf8', stdio: 'pipe' }), /already exists/);
     assert.equal(fs.readFileSync(file, 'utf8'), 'e vjetër');
+
+    // The schema command does nothing when it was not told which database is meant.
+    const root = path.join(__dirname, '..');
+    assert.throws(() => execFileSync(process.execPath, ['scripts/migrate.cjs'], { cwd: root, env, encoding: 'utf8', stdio: 'pipe' }), /DATABASE_URL is not set/);
+    assert.match(execFileSync(process.execPath, ['scripts/migrate.cjs', '--local'], { cwd: root, env, encoding: 'utf8' }), /Schema applied to the built-in database: \d+ tables/);
     fs.rmSync(dir, { recursive: true, force: true });
     assert.ok(res.data.user.id);
   });

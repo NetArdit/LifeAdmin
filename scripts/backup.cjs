@@ -21,7 +21,13 @@ const fail = (message) => {
       if (fs.existsSync(file)) fail(`${file} already exists. Choose another name: a backup is never overwritten.`);
       const backup = await exportBackup();
       fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(backup));
+      try {
+        // 'wx': the write itself refuses an existing file, so two backups started together cannot share a name.
+        fs.writeFileSync(file, JSON.stringify(backup), { flag: 'wx' });
+      } catch (err) {
+        if (err.code === 'EEXIST') fail(`${file} already exists. Choose another name: a backup is never overwritten.`);
+        throw err;
+      }
       const rows = Object.values(backup.tables).reduce((n, t) => n + t.length, 0);
       console.log(`Backup of ${where} written to ${file}: ${rows} rows in ${Object.keys(backup.tables).length} tables.`);
       console.log('It holds personal data in the clear. Keep it where the database secrets are kept.');

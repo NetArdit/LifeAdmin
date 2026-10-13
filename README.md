@@ -80,7 +80,8 @@ npm test                                # the whole suite, one file at a time
 npm run lint
 npm run build:web                       # rebuild the React bundle
 npm run seed                            # a demo account with sample data
-npm run db:migrate                      # apply schema.sql to the database in DATABASE_URL
+npm run db:migrate                      # apply schema.sql to the server in DATABASE_URL (refuses without one)
+npm run db:migrate -- --local           # the same for this machine's built-in database
 npm run push:keys                       # make the Web Push key pair and the storage key
 npm run db:backup -- backups/<name>.json
 npm run db:restore -- backups/<name>.json
@@ -96,7 +97,11 @@ npm run db:restore -- backups/<name>.json
 - Every notification is a row in the bell first. If the person turned notifications on for a device, it is also
   pushed there (Web Push). The push carries no text of the task or message, only what kind of thing happened and
   where to open it. Circle members get one notification per chat message, task comment and new circle task,
-  except the author; a circle can be muted for 1, 8 or 24 hours.
+  except the author; a circle can be muted for 1, 8 or 24 hours. Circle events arrive at once, at night too; a person
+  can choose in Settings that in their quiet hours circles fill the bell without sounding a device.
+- The bell row is also the record of the push that is owed (`push_status`): a push that was never attempted or
+  failed in passing is tried again by the scheduled function, up to three times, and closed unsent once it is
+  no longer news (30 minutes for a circle event). Delivery is at least once, not exactly once.
 - Web Push needs `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` and `PUSH_STORE_KEY`
   (`npm run push:keys` prints a set). Without them the bell works and the device switch says it is unavailable.
   On an iPhone push works only after the site is added to the home screen.
@@ -104,7 +109,7 @@ npm run db:restore -- backups/<name>.json
 ## Backups
 
 `npm run db:backup -- backups/2026-10-13.json` writes everything people entered into one JSON file, read in a
-single transaction. It never writes over an existing file. `npm run db:restore -- <file>` puts a file into an
+single transaction that sees one moment. It never writes over an existing file. `npm run db:restore -- <file>` puts a file into an
 **empty** database, whole or not at all, and refuses a database that has rows.
 
 - The file holds personal data in the clear, password hashes included. Keep it where the database secrets are
@@ -112,7 +117,9 @@ single transaction. It never writes over an existing file. `npm run db:restore -
 - Left out on purpose: sessions, device subscriptions, one-time codes, reset links and the limit counters.
   After a restore everybody signs in again and turns device notifications on again.
 - Both commands use the database the server would use: `DATABASE_URL` from `.env`, or the local one.
-- A restore expects the same version of the schema that made the backup.
+- A restore requires the same tables and columns as the version that made the backup, and says which differ.
+  While it runs it locks the tables, so stop the application first or it will wait.
+- Not verified on a PostgreSQL server yet, and not with a database of real size (it is held in memory).
 
 ## Notes
 

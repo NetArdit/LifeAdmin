@@ -13,7 +13,9 @@
 const crypto = require('crypto');
 const db = require('../db');
 
-const secret = () => process.env.RATE_LIMIT_SECRET || process.env.PUSH_STORE_KEY || 'lifeadmin-rate-limits';
+// The key: RATE_LIMIT_SECRET, else another secret this server already holds and a copy of the database does
+// not contain. The constant is for a developer's machine only, where there is nothing to protect.
+const secret = () => process.env.RATE_LIMIT_SECRET || process.env.PUSH_STORE_KEY || process.env.DATABASE_URL || 'lifeadmin-rate-limits';
 const hashOf = (name, key) => crypto.createHmac('sha256', secret()).update(`${name}|${key}`).digest('hex');
 
 function createLimiter({ name, windowMs, max }) {

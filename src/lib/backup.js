@@ -13,11 +13,19 @@
 const db = require('../db');
 
 const NOT_BACKED_UP = ['sessions', 'push_subscriptions', 'otp_codes', 'password_reset_tokens', 'rate_limits'];
-const FORMAT = 1;
+const FORMAT = 2;
 
 async function tableNames() {
   const rows = await db.all("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name");
   return rows.map((r) => r.table_name).filter((t) => /^[a-z_][a-z0-9_]*$/.test(t));
+}
+
+/** Every table's columns, in a fixed order: what a backup must match to be put back as it was taken. */
+async function shapeOf(tables) {
+  const rows = await db.all("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, column_name");
+  const out = {};
+  for (const t of tables) out[t] = rows.filter((r) => r.table_name === t).map((r) => r.column_name);
+  return out;
 }
 
 /** Tables with the ones others point to first, so that a restore never inserts a row before what it refers to. */
@@ -43,16 +51,18 @@ async function inDependencyOrder(tables) {
 
 async function exportBackup(now = new Date()) {
   const tables = (await tableNames()).filter((t) => !NOT_BACKED_UP.includes(t));
-  const backup = { format: FORMAT, app: 'lifeadmin', takenAt: now.toISOString(), tables: {} };
-  // One transaction: the file is the database at one moment, not a mix of several.
+  const backup = { format: FORMAT, app: 'lifeadmin', takenAt: now.toISOString(), shape: await shapeOf(tables), tables: {} };
+  // One transaction that sees one moment (REPEATABLE READ; the default would let each table's reading see
+  // what was committed in between): the file is the database at that moment, not a mix of several.
   await db.tx(async () => {
+    await db.run('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
     for (const table of tables) backup.tables[table] = await db.all(`SELECT * FROM ${table} ORDER BY 1`);
   });
   return backup;
 }
 
 function checkBackup(backup) {
-  if (!backup || backup.app !== 'lifeadmin' || backup.format !== FORMAT || typeof backup.tables !== 'object' || backup.tables === null) {
+  if (!backup || backup.app !== 'lifeadmin' || backup.format !== FORMAT || typeof backup.tables !== 'object' || backup.tables === null || typeof backup.shape !== 'object' || backup.shape === null) {
     throw new Error('This file is not a LifeAdmin backup of a format this version reads.');
   }
   for (const [table, rows] of Object.entries(backup.tables)) {
@@ -65,12 +75,21 @@ function checkBackup(backup) {
 async function restoreBackup(input) {
   const backup = checkBackup(input);
   const known = await tableNames();
-  const unknown = Object.keys(backup.tables).filter((t) => !known.includes(t));
-  if (unknown.length) throw new Error(`The backup has tables this database does not have (${unknown.join(', ')}): it was made by another version.`);
+  // The backup must have exactly the tables and columns this version keeps: an older one would come back
+  // with parts missing, and nobody would be told.
+  const expected = known.filter((t) => !NOT_BACKED_UP.includes(t));
+  const shape = await shapeOf(expected);
+  const differs = [...new Set([...expected, ...Object.keys(backup.tables), ...Object.keys(backup.shape)])].filter(
+    (t) => !expected.includes(t) || !Array.isArray(backup.tables[t]) || JSON.stringify(backup.shape[t]) !== JSON.stringify(shape[t])
+  );
+  if (differs.length) throw new Error(`The backup was made by another version of LifeAdmin: these tables differ (${differs.sort().join(', ')}). Restore it with the version that made it.`);
   const order = (await inDependencyOrder(known)).filter((t) => backup.tables[t]);
   const counts = {};
   await db.tx(async () => {
-    for (const table of known.filter((t) => !NOT_BACKED_UP.includes(t))) {
+    // Nothing else reads or writes these tables until the restore is in or has failed: neither the
+    // application nor a second restore can slip rows in between the check and the last insert.
+    await db.run(`LOCK TABLE ${expected.join(', ')} IN ACCESS EXCLUSIVE MODE`);
+    for (const table of expected) {
       if ((await db.get(`SELECT 1 AS x FROM ${table} LIMIT 1`))) throw new Error(`This database is not empty (table "${table}" has rows). A backup is restored into an empty database only.`);
     }
     for (const table of order) {
@@ -81,7 +100,7 @@ async function restoreBackup(input) {
       counts[table] = rows.length;
       // New rows must continue after the highest id that came back.
       const id = await db.get("SELECT pg_get_serial_sequence(?, 'id') AS seq", [table]).catch(() => null);
-      if (id && id.seq && rows.length) await db.get(`SELECT setval('${id.seq}', (SELECT max(id) FROM ${table}))`);
+      if (id && id.seq && rows.length) await db.get(`SELECT setval(?::regclass, (SELECT max(id) FROM ${table}))`, [id.seq]);
     }
   });
   return counts;

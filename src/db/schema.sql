@@ -136,12 +136,18 @@ CREATE TABLE IF NOT EXISTS notifications (
   title TEXT NOT NULL,
   body TEXT,
   link TEXT, -- e.g. '#/tasks/12'
-  push_status TEXT, -- what became of the push to the person's devices: sent | none | failed | muted; NULL: not tried
+  family_id INTEGER REFERENCES families(id) ON DELETE SET NULL, -- the circle the event belongs to, if any
+  push_kind TEXT, -- the fixed sentence a device shows, when it is not the one of the type
+  -- The push to the person's devices (notify.js): pending (owed) | sent | none | failed | muted | quiet | left | expired; NULL: this server sends none
+  push_status TEXT,
+  push_attempts INTEGER NOT NULL DEFAULT 0,
+  push_retry_at TEXT, -- while owed: nobody tries it again before this moment
   read_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_notif_push_owed ON notifications(id) WHERE push_status = 'pending';
 
 CREATE TABLE IF NOT EXISTS bills (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

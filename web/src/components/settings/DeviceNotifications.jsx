@@ -217,8 +217,19 @@ export function ReminderTimes({ ctx }) {
             </div>
           ) : null}
           <p className="text-sm muted" style={{ marginTop: 'var(--sp-1)' }}>
-            A reminder that falls in these hours arrives when they end; none is lost. Messages and activity in your circles are not held back.
+            A reminder that falls in these hours arrives when they end; none is lost.
           </p>
+          {data.defaults.quietOn ? (
+            <>
+              <label className="checkbox-row" style={{ marginTop: 'var(--sp-2)' }}>
+                <input type="checkbox" checked={data.defaults.quietCircles} onChange={(e) => save({ defaults: { quietCircles: e.target.checked } })} />
+                Keep my circles quiet in these hours too
+              </label>
+              <p className="text-sm muted" style={{ marginTop: 'var(--sp-1)' }}>
+                Off: messages and activity in your circles reach your devices at any hour. On: at night they appear under the bell only, and are not sent again in the morning.
+              </p>
+            </>
+          ) : null}
         </div>
         {DEFAULT_ROWS.map(([key, label]) => (
           <div className="field" key={key}>

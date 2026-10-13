@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
 const { isNonEmpty, ValidationError } = require('../lib/validate');
 const { requireMembership } = require('../lib/family');
 const { notifyFamily } = require('../lib/notify');
@@ -57,7 +57,7 @@ router.get(
 
 router.post(
   '/:familyId/messages',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const familyId = Number(req.params.familyId);
     await requireMembership(req.user.id, familyId);
     const body = req.body && req.body.body;
