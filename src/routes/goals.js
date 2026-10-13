@@ -7,6 +7,8 @@ const { logActivity } = require('../lib/family');
 const { computeProgress } = require('../lib/goalProgress');
 const ai = require('../lib/ai');
 
+const { parseReminder, reminderOf, replanGoal, forgetGoal } = require('../lib/reminders');
+
 const router = express.Router();
 
 const CATEGORIES = ['learning', 'fitness', 'financial', 'career', 'habit', 'personal'];
@@ -21,6 +23,7 @@ function mapGoal(g, milestones = []) {
     targetDate: g.target_date,
     status: g.status,
     progress: g.progress,
+    reminder: reminderOf(g),
     createdAt: g.created_at,
     milestones: milestones.map((m) => ({ id: m.id, title: m.title, done: !!m.done, dueDate: m.due_date })),
   };
@@ -55,6 +58,8 @@ async function recomputeProgress(goalId) {
   } else if (!allDone && goal.status === 'completed') {
     await db.run("UPDATE goals SET status = 'active' WHERE id = ?", [goalId]);
   }
+  // Every change of a step passes here: a step added, done, reopened or removed moves the reminders.
+  await replanGoal(goalId);
 }
 
 router.get(
@@ -73,13 +78,17 @@ router.post(
     const b = req.body || {};
     if (!isNonEmpty(b.title)) throw new ValidationError('Title is required.', { title: 'Required' });
     if (b.category && !CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
-    const result = await db.run('INSERT INTO goals (owner_id, title, description, category, target_date) VALUES (?,?,?,?,?)', [
+    const reminder = parseReminder(b.reminder) || { mode: 'default', minutes: null };
+    const result = await db.run('INSERT INTO goals (owner_id, title, description, category, target_date, reminder_mode, reminder_minutes_before) VALUES (?,?,?,?,?,?,?)', [
       req.user.id,
       b.title.trim(),
       b.description || null,
       b.category || 'personal',
       b.targetDate || null,
+      reminder.mode,
+      reminder.minutes,
     ]);
+    await replanGoal(result.lastInsertRowid);
     res.status(201).json({ goal: mapGoal(await db.get('SELECT * FROM goals WHERE id = ?', [result.lastInsertRowid])) });
   })
 );
@@ -111,9 +120,15 @@ router.patch(
         params.push(b[key]);
       }
     }
+    const reminder = parseReminder(b.reminder);
+    if (reminder) {
+      fields.push('reminder_mode = ?', 'reminder_minutes_before = ?');
+      params.push(reminder.mode, reminder.minutes);
+    }
     if (!fields.length) return res.json({ goal: mapGoal(g, await milestonesFor(g.id)) });
     fields.push("updated_at = datetime('now')");
     await db.run(`UPDATE goals SET ${fields.join(', ')} WHERE id = ?`, [...params, g.id]);
+    await replanGoal(g.id);
     const updated = await db.get('SELECT * FROM goals WHERE id = ?', [g.id]);
     res.json({ goal: mapGoal(updated, await milestonesFor(g.id)) });
   })
@@ -125,6 +140,7 @@ router.delete(
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     await db.run('DELETE FROM goals WHERE id = ?', [g.id]);
+    await forgetGoal(g);
     res.json({ ok: true });
   })
 );

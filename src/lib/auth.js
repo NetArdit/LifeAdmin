@@ -128,6 +128,7 @@ function publicUser(u) {
     language: u.language,
     aiEnabled: !!u.ai_enabled,
     notifPrefs: safeJson(u.notif_prefs, {}),
+    timezone: u.timezone || null,
     createdAt: u.created_at,
   };
 }

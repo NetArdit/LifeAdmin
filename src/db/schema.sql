@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
   language TEXT NOT NULL DEFAULT 'en',
   ai_enabled INTEGER NOT NULL DEFAULT 1,
   notif_prefs TEXT NOT NULL DEFAULT '{"task":true,"comment":true,"chat":true,"bill":true,"decision":true,"ai":true}',
+  timezone TEXT, -- IANA name, e.g. Europe/Belgrade; NULL until the person's browser tells it
+  reminder_prefs TEXT NOT NULL DEFAULT '{}', -- JSON: what differs from the defaults in src/lib/reminders.js
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -85,7 +87,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   duration_minutes INTEGER,
   recurrence TEXT, -- null | 'daily' | 'weekly' | 'weekdays' | 'monthly'
   recurrence_until TEXT,
-  reminder_minutes_before INTEGER,
+  reminder_mode TEXT NOT NULL DEFAULT 'default', -- default | none | custom
+  reminder_minutes_before INTEGER, -- only with reminder_mode 'custom'
   notes TEXT,
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -149,6 +152,8 @@ CREATE TABLE IF NOT EXISTS bills (
   due_date TEXT NOT NULL,
   recurrence TEXT NOT NULL DEFAULT 'monthly', -- none | weekly | monthly | yearly
   status TEXT NOT NULL DEFAULT 'unpaid', -- unpaid | paid
+  reminder_mode TEXT NOT NULL DEFAULT 'default', -- default | none | custom
+  reminder_minutes_before INTEGER,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -203,6 +208,8 @@ CREATE TABLE IF NOT EXISTS goals (
   target_date TEXT,
   status TEXT NOT NULL DEFAULT 'active', -- active | completed | abandoned
   progress INTEGER NOT NULL DEFAULT 0, -- 0-100
+  reminder_mode TEXT NOT NULL DEFAULT 'default', -- default | none | custom
+  reminder_minutes_before INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -271,3 +278,25 @@ CREATE TABLE IF NOT EXISTS shopping_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shopping_family ON shopping_items(family_id);
+
+-- Reminders that depend on time (src/lib/reminders.js). One row per person, item, occurrence and rule.
+-- source_id has no foreign key: it names a task, a bill, a goal or a milestone, by source_type.
+CREATE TABLE IF NOT EXISTS planned_reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL, -- task | bill | goal | milestone
+  source_id INTEGER NOT NULL,
+  occurrence_key TEXT NOT NULL, -- the due date or moment this reminder is for
+  rule_key TEXT NOT NULL, -- 'before:60'
+  scheduled_at TEXT NOT NULL, -- UTC, '2026-10-13T07:00:00Z'
+  timezone TEXT NOT NULL, -- the zone the moment was worked out in
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | claimed | sent | cancelled | failed
+  claimed_until TEXT,
+  sent_at TEXT,
+  cancelled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, source_type, source_id, occurrence_key, rule_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_planned_due ON planned_reminders(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_planned_source ON planned_reminders(source_type, source_id, status);

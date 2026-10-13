@@ -7,6 +7,8 @@ const { VISIBILITIES, canAccessTask, taskAccessSql, canDeleteOrphanedTask } = re
 const { notifyFamily, notifyUser } = require('../lib/notify');
 const { addDays, todayISO, nextRecurrenceDate, daysBetween } = require('../lib/dates');
 
+const { parseReminder, reminderOf, replanTask, forget: forgetReminders } = require('../lib/reminders');
+
 const router = express.Router();
 
 const STATUSES = ['todo', 'in_progress', 'completed', 'cancelled'];
@@ -39,6 +41,15 @@ async function validateAssignment(assignedTo, familyId) {
   }
 }
 
+// The reminder an item asks for: { mode, minutesBefore } in `reminder`. The older single number is still
+// read: a number is a choice, null goes back to the person's default.
+function taskReminder(b) {
+  if (b.reminder !== undefined) return parseReminder(b.reminder);
+  if (b.reminderMinutesBefore === undefined) return undefined;
+  if (b.reminderMinutesBefore === null) return { mode: 'default', minutes: null };
+  return parseReminder({ mode: 'custom', minutesBefore: b.reminderMinutesBefore });
+}
+
 function mapTask(t) {
   return {
     id: t.id,
@@ -56,6 +67,7 @@ function mapTask(t) {
     durationMinutes: t.duration_minutes,
     recurrence: t.recurrence,
     recurrenceUntil: t.recurrence_until,
+    reminder: reminderOf(t),
     reminderMinutesBefore: t.reminder_minutes_before,
     notes: t.notes,
     completedAt: t.completed_at,
@@ -163,11 +175,12 @@ router.post(
       visibility = b.visibility === 'family' ? 'family' : 'private';
     }
     await validateAssignment(b.assignedTo, familyId);
+    const reminder = taskReminder(b) || { mode: 'default', minutes: null };
 
     const result = await db.run(
       `INSERT INTO tasks (owner_id, family_id, assigned_to, visibility, title, description, category, status,
-        priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_minutes_before, notes)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_mode, reminder_minutes_before, notes)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         req.user.id,
         familyId,
@@ -183,7 +196,8 @@ router.post(
         b.durationMinutes || null,
         b.recurrence || null,
         b.recurrenceUntil || null,
-        b.reminderMinutesBefore || null,
+        reminder.mode,
+        reminder.minutes,
         b.notes || null,
       ]
     );
@@ -216,6 +230,7 @@ router.post(
       });
     }
 
+    await replanTask(result.lastInsertRowid);
     const t = await db.get('SELECT * FROM tasks WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({ task: mapTask(t) });
   })
@@ -252,8 +267,8 @@ async function spawnNextOccurrence(t) {
 
   const result = await db.run(
     `INSERT INTO tasks (owner_id, family_id, assigned_to, visibility, title, description, category, status,
-      priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_minutes_before, notes)
-     VALUES (?,?,?,?,?,?,?,'todo',?,?,?,?,?,?,?,?)`,
+      priority, due_date, start_time, duration_minutes, recurrence, recurrence_until, reminder_mode, reminder_minutes_before, notes)
+     VALUES (?,?,?,?,?,?,?,'todo',?,?,?,?,?,?,?,?,?)`,
     [
       t.owner_id,
       t.family_id,
@@ -268,10 +283,12 @@ async function spawnNextOccurrence(t) {
       t.duration_minutes,
       t.recurrence,
       t.recurrence_until,
+      t.reminder_mode || 'default',
       t.reminder_minutes_before,
       t.notes,
     ]
   );
+  await replanTask(result.lastInsertRowid);
   return result.lastInsertRowid;
 }
 
@@ -347,7 +364,6 @@ router.patch(
       durationMinutes: 'duration_minutes',
       recurrence: 'recurrence',
       recurrenceUntil: 'recurrence_until',
-      reminderMinutesBefore: 'reminder_minutes_before',
       notes: 'notes',
     };
     for (const [key, col] of Object.entries(map)) {
@@ -355,6 +371,11 @@ router.patch(
         fields.push(`${col} = ?`);
         params.push(b[key]);
       }
+    }
+    const reminder = taskReminder(b);
+    if (reminder) {
+      fields.push('reminder_mode = ?', 'reminder_minutes_before = ?');
+      params.push(reminder.mode, reminder.minutes);
     }
     if (b.status === 'completed' && t.status !== 'completed') {
       fields.push('completed_at = datetime(\'now\')');
@@ -366,6 +387,7 @@ router.patch(
 
     fields.push("updated_at = datetime('now')");
     await db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, [...params, t.id]);
+    await replanTask(t.id);
 
     const updated = await db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
     if (b.status === 'completed' && t.status !== 'completed') {
@@ -421,6 +443,7 @@ router.post(
       }
     }
     await db.run("UPDATE tasks SET due_date = ?, start_time = ?, updated_at = datetime('now') WHERE id = ?", [newDue, newStart, t.id]);
+    await replanTask(t.id);
     const updated = await db.get('SELECT * FROM tasks WHERE id = ?', [t.id]);
     res.json({ task: mapTask(updated) });
   })
@@ -435,6 +458,7 @@ router.delete(
     const allowed = t && ((t.owner_id === req.user.id && await canAccessTask(req.user.id, t)) || await canDeleteOrphanedTask(req.user.id, t));
     if (!allowed) return res.status(404).json({ error: 'Task not found.' });
     await db.run('DELETE FROM tasks WHERE id = ?', [t.id]);
+    await forgetReminders('task', t.id);
     res.json({ ok: true });
   })
 );

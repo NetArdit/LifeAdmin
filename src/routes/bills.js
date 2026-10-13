@@ -7,6 +7,8 @@ const { logActivity, requireMembership, getMembership } = require('../lib/family
 const { notifyFamily } = require('../lib/notify');
 const ai = require('../lib/ai');
 
+const { parseReminder, reminderOf, replanBill, forget: forgetReminders } = require('../lib/reminders');
+
 const router = express.Router();
 
 const CATEGORIES = [
@@ -36,6 +38,7 @@ function mapBill(b) {
     dueDate: b.due_date,
     recurrence: b.recurrence,
     status: b.status,
+    reminder: reminderOf(b),
     notes: b.notes,
     daysUntilDue: daysUntil(b.due_date),
     createdAt: b.created_at,
@@ -158,9 +161,10 @@ router.post(
       familyId = b.familyId;
     }
 
+    const reminder = parseReminder(b.reminder) || { mode: 'default', minutes: null };
     const result = await db.run(
-      `INSERT INTO bills (owner_id, family_id, name, category, amount, currency, due_date, recurrence, notes)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO bills (owner_id, family_id, name, category, amount, currency, due_date, recurrence, notes, reminder_mode, reminder_minutes_before)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [
         req.user.id,
         familyId,
@@ -171,8 +175,11 @@ router.post(
         b.dueDate,
         b.recurrence || 'monthly',
         b.notes || null,
+        reminder.mode,
+        reminder.minutes,
       ]
     );
+    await replanBill(result.lastInsertRowid);
     const bill = await db.get('SELECT * FROM bills WHERE id = ?', [result.lastInsertRowid]);
     res.status(201).json({ bill: mapBill(bill) });
   })
@@ -205,9 +212,15 @@ router.patch(
         params.push(b[key]);
       }
     }
+    const reminder = parseReminder(b.reminder);
+    if (reminder) {
+      fields.push('reminder_mode = ?', 'reminder_minutes_before = ?');
+      params.push(reminder.mode, reminder.minutes);
+    }
     if (!fields.length) return res.json({ bill: mapBill(bill) });
     fields.push("updated_at = datetime('now')");
     await db.run(`UPDATE bills SET ${fields.join(', ')} WHERE id = ?`, [...params, bill.id]);
+    await replanBill(bill.id);
     res.json({ bill: mapBill(await db.get('SELECT * FROM bills WHERE id = ?', [bill.id])) });
   })
 );
@@ -233,6 +246,9 @@ router.post(
         bill.id,
       ]);
     }
+
+    // Paid for good: nothing left to remind of. Rolled to its next date: the reminder moves with it.
+    await replanBill(bill.id);
 
     // Side effects go to the family only while the payer is STILL a member of it
     // (covers bills stored before the F-01 fix and members who have since left).
@@ -262,6 +278,7 @@ router.delete(
     const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
     await db.run('DELETE FROM bills WHERE id = ?', [bill.id]);
+    await forgetReminders('bill', bill.id);
     res.json({ ok: true });
   })
 );

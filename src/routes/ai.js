@@ -8,6 +8,8 @@ const { getUserFamilyIds } = require('../lib/family');
 const { taskAccessSql } = require('../lib/taskAccess');
 const ai = require('../lib/ai');
 
+const { replanTask } = require('../lib/reminders');
+
 const router = express.Router();
 
 const WEEKDAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -104,16 +106,19 @@ router.post(
     }
 
     let created = 0;
+    const createdIds = [];
     await db.tx(async () => {
       for (const b of blocks) {
-        await db.run(
+        const inserted = await db.run(
           `INSERT INTO tasks (owner_id, title, category, status, priority, due_date, start_time, duration_minutes, notes)
            VALUES (?,?,?,?,?,?,?,?,?)`,
           [req.user.id, b.label, 'plan', 'todo', 'medium', b.date, b.startISO, b.duration, 'Created from AI weekly plan']
         );
+        createdIds.push(inserted.lastInsertRowid);
         created++;
       }
     });
+    for (const id of createdIds) await replanTask(id);
     res.status(201).json({ ok: true, created });
   })
 );

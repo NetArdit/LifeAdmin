@@ -25,3 +25,6 @@ Thumbs.db
 
 # Netlify local state
 .netlify/
+
+# The local PostgreSQL (PGlite) database of development
+data/pg/

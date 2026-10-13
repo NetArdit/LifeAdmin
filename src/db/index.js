@@ -125,6 +125,18 @@ async function open() {
     await backend.exec(translateSchema(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')));
     // A column added to schema.sql after a table existed.
     await backend.exec('ALTER TABLE decision_options ADD COLUMN IF NOT EXISTS risks TEXT');
+    await backend.exec(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_prefs TEXT NOT NULL DEFAULT '{}';
+      ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'default';
+      ALTER TABLE bills ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'default';
+      ALTER TABLE bills ADD COLUMN IF NOT EXISTS reminder_minutes_before INTEGER;
+      ALTER TABLE goals ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'default';
+      ALTER TABLE goals ADD COLUMN IF NOT EXISTS reminder_minutes_before INTEGER;
+      -- A number stored before the mode existed was a choice. It can only match once: afterwards every
+      -- 'default' row has no number.
+      UPDATE tasks SET reminder_mode = 'custom' WHERE reminder_mode = 'default' AND reminder_minutes_before IS NOT NULL;
+    `);
     await hardenFamilies(backend);
   }
   return backend;

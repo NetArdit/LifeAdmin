@@ -4,6 +4,7 @@ const { asyncRoute } = require('../middleware/errorHandler');
 const { isNonEmpty, ValidationError } = require('../lib/validate');
 const { hashPassword, verifyPassword, publicUser, clearSessionCookie, deleteSessionsForUser } = require('../lib/auth');
 const { taskAccessSql } = require('../lib/taskAccess');
+const reminders = require('../lib/reminders');
 
 const router = express.Router();
 
@@ -56,6 +57,46 @@ router.patch(
     if (!fields.length) return res.json({ user: publicUser(req.user) });
     await db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, [...params, req.user.id]);
     res.json({ user: publicUser(await db.get('SELECT * FROM users WHERE id = ?', [req.user.id])) });
+  })
+);
+
+// Reminders: the person's time zone and what an item gets when it does not say otherwise.
+function remindersOf(user) {
+  return { timezone: user.timezone || null, effectiveTimezone: reminders.zoneOf(user), defaults: reminders.prefsOf(user), offsets: reminders.OFFSETS };
+}
+
+router.get(
+  '/reminders',
+  asyncRoute(async (req, res) => {
+    res.json({ reminders: remindersOf(req.user) });
+  })
+);
+
+router.patch(
+  '/reminders',
+  asyncRoute(async (req, res) => {
+    const { timezone, defaults } = req.body || {};
+    const fields = [];
+    const params = [];
+    if (timezone !== undefined) {
+      if (!reminders.isZone(timezone)) throw new ValidationError('Unknown time zone.', { timezone: 'Unknown' });
+      fields.push('timezone = ?');
+      params.push(timezone);
+    }
+    if (defaults !== undefined) {
+      const changed = reminders.parsePrefs(defaults);
+      let stored = {};
+      try {
+        stored = JSON.parse(req.user.reminder_prefs || '{}') || {};
+      } catch {}
+      fields.push('reminder_prefs = ?');
+      params.push(JSON.stringify({ ...stored, ...changed }));
+    }
+    if (!fields.length) return res.json({ reminders: remindersOf(req.user) });
+    await db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, [...params, req.user.id]);
+    // What was planned with the old zone or the old defaults is worked out again.
+    await reminders.replanUser(req.user.id);
+    res.json({ reminders: remindersOf(await db.get('SELECT * FROM users WHERE id = ?', [req.user.id])) });
   })
 );
 
