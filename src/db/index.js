@@ -145,6 +145,22 @@ async function open() {
       -- A number stored before the mode existed was a choice. It can only match once: afterwards every
       -- 'default' row has no number.
       UPDATE tasks SET reminder_mode = 'custom' WHERE reminder_mode = 'default' AND reminder_minutes_before IS NOT NULL;
+      ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS claim_token TEXT;
+      ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS last_error TEXT;
+      -- Only the three known choices can be stored, whoever writes the row.
+      DO $$
+      DECLARE t text;
+      BEGIN
+        FOREACH t IN ARRAY ARRAY['tasks', 'bills', 'goals'] LOOP
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = t || '_reminder_mode_check') THEN
+            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I CHECK (reminder_mode IN (''default'', ''none'', ''custom''))', t, t || '_reminder_mode_check');
+          END IF;
+        END LOOP;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'planned_reminders_status_check') THEN
+          ALTER TABLE planned_reminders ADD CONSTRAINT planned_reminders_status_check CHECK (status IN ('pending', 'claimed', 'sent', 'cancelled', 'failed'));
+        END IF;
+      END $$;
     `);
     await hardenFamilies(backend);
   }

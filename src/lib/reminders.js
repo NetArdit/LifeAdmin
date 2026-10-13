@@ -226,6 +226,28 @@ async function wantedForGoal(goal, milestones) {
   return out;
 }
 
+/**
+ * What is wanted right now for one item, for the worker that is about to send: the same answer the planner
+ * would give. With `lock`, the item's row is held until the caller's transaction ends, so the item cannot
+ * change between this answer and the sending. A step is answered through its goal.
+ */
+async function wantedFor(sourceType, sourceId, { lock = false } = {}) {
+  const hold = lock ? ' FOR UPDATE' : '';
+  if (sourceType === 'task') return wantedForTask(await db.get(`SELECT * FROM tasks WHERE id = ?${hold}`, [sourceId]));
+  if (sourceType === 'bill') return wantedForBill(await db.get(`SELECT * FROM bills WHERE id = ?${hold}`, [sourceId]));
+  let goalId = sourceId;
+  if (sourceType === 'milestone') {
+    const step = await db.get('SELECT goal_id FROM goal_milestones WHERE id = ?', [sourceId]);
+    if (!step) return [];
+    goalId = step.goal_id;
+  } else if (sourceType !== 'goal') {
+    return [];
+  }
+  const goal = await db.get(`SELECT * FROM goals WHERE id = ?${hold}`, [goalId]);
+  if (!goal) return [];
+  return wantedForGoal(goal, await db.all('SELECT * FROM goal_milestones WHERE goal_id = ? ORDER BY id', [goal.id]));
+}
+
 // ---- making the table agree -----------------------------------------------------------------------------
 
 const keyOf = (r) => `${r.userId ?? r.user_id}|${r.sourceType ?? r.source_type}|${r.sourceId ?? r.source_id}|${r.occurrenceKey ?? r.occurrence_key}|${r.ruleKey ?? r.rule_key}`;
@@ -361,6 +383,7 @@ module.exports = {
   parsePrefs,
   parseReminder,
   reminderOf,
+  wantedFor,
   replanTask,
   replanBill,
   replanGoal,

@@ -291,7 +291,10 @@ CREATE TABLE IF NOT EXISTS planned_reminders (
   scheduled_at TEXT NOT NULL, -- UTC, '2026-10-13T07:00:00Z'
   timezone TEXT NOT NULL, -- the zone the moment was worked out in
   status TEXT NOT NULL DEFAULT 'pending', -- pending | claimed | sent | cancelled | failed
-  claimed_until TEXT,
+  claimed_until TEXT, -- the lease of the run that holds the row
+  claim_token TEXT, -- that run's own mark: only its holder may finish the row
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT, -- a code, never content
   sent_at TEXT,
   cancelled_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

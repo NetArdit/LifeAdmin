@@ -8,6 +8,10 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# The clock of the reminders: every 15 minutes (UTC). More often would keep the database awake all month.
+[functions."reminders"]
+  schedule = "*/15 * * * *"
+
 # `force` so that no published file can ever answer in the API's place.
 [[redirects]]
   from = "/api/*"
