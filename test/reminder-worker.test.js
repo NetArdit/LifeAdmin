@@ -69,6 +69,18 @@ test('reminders: the worker', async (t) => {
     assert.equal((await bells(id)).length, 3);
   });
 
+  await t.test('a run that runs out of time gives back what it did not reach, and that is not counted as an attempt', async () => {
+    const { c, id } = await person();
+    for (const title of ['One', 'Two', 'Three']) await c.post('/api/tasks', { title, dueDate: ahead(10) });
+    const now = Date.parse((await db.get("SELECT MAX(scheduled_at) AS s FROM planned_reminders WHERE user_id = ?", [id])).s) + 1000;
+    const out = await worker.runDue({ now, budgetMs: -1 });
+    assert.deepEqual({ claimed: out.claimed, sent: out.sent, released: out.released }, { claimed: 3, sent: 0, released: 3 });
+    const left = await db.all("SELECT status, attempts, claim_token FROM planned_reminders WHERE user_id = ?", [id]);
+    assert.deepEqual(left, Array(3).fill({ status: 'pending', attempts: 0, claim_token: null }));
+    assert.equal((await worker.runDue({ now })).sent, 3, 'the next run takes them at once');
+    assert.equal((await bells(id)).length, 3);
+  });
+
   await t.test('a run that died: its row is taken again after the lease, and the dead run can no longer finish it', async () => {
     const { c, id } = await person();
     const task = (await c.post('/api/tasks', { title: 'Lease', dueDate: ahead(10) })).data.task;
@@ -235,6 +247,6 @@ test('reminders: the worker', async (t) => {
     const { handler } = require('../netlify/functions/reminders');
     const res = await handler();
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(Object.keys(JSON.parse(res.body)).sort(), ['cancelled', 'claimed', 'failed', 'lost', 'ms', 'retry', 'sent']);
+    assert.deepEqual(Object.keys(JSON.parse(res.body)).sort(), ['cancelled', 'claimed', 'failed', 'lost', 'ms', 'released', 'retry', 'sent']);
   });
 });

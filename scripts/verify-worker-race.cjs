@@ -93,11 +93,17 @@ const RUN = `
   // 3. Whole runs at the same instant: every reminder in the bell exactly once.
   await db.run("UPDATE planned_reminders SET status = 'pending', claim_token = NULL, claimed_until = NULL, attempts = 0, sent_at = NULL");
   await db.run('DELETE FROM notifications');
-  const env = { NOW: String(now), LIMIT: '50', GO_AT: String(Date.now() + 4000) };
-  const runs = (await Promise.all([child(RUN, env), child(RUN, env), child(RUN, env)])).map((x) => JSON.parse(x));
+  // A run stops when its time is up and gives the rest back, so three at a time are repeated until nothing is due.
+  const waves = [];
+  for (let wave = 0; wave < 12; wave++) {
+    const env = { NOW: String(now), LIMIT: '50', GO_AT: String(Date.now() + 4000) };
+    const runs = (await Promise.all([child(RUN, env), child(RUN, env), child(RUN, env)])).map((x) => JSON.parse(x));
+    waves.push({ sent: runs.map((r) => r.sent), released: runs.map((r) => r.released), lost: runs.map((r) => r.lost), ms: runs.map((r) => r.ms) });
+    if (runs.every((r) => r.claimed === 0)) break;
+  }
   const bells = await db.get('SELECT COUNT(*)::int AS n, COUNT(DISTINCT link)::int AS items FROM notifications');
   const states = await db.all('SELECT status, COUNT(*)::int AS n FROM planned_reminders GROUP BY status');
-  report.runs = { sent: runs.map((r) => r.sent), lost: runs.map((r) => r.lost), bells: bells.n, itemsWithABell: bells.items, states };
+  report.runs = { waves, bells: bells.n, itemsWithABell: bells.items, states };
   if (bells.n !== ROWS || bells.items !== ROWS) throw new Error(`runs: ${bells.n} bells for ${bells.items} items, expected ${ROWS} and ${ROWS}`);
 
   report.server = (await db.get('SHOW server_version')).server_version;

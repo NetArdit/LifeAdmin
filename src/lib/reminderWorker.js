@@ -119,13 +119,19 @@ async function handle(row, token, { now = Date.now(), deliver = deliverToBell } 
 async function runDue(options = {}) {
   const started = Date.now();
   const { token, rows } = await claimDue(options);
-  const counts = { claimed: rows.length, sent: 0, cancelled: 0, retry: 0, failed: 0, lost: 0 };
+  const counts = { claimed: rows.length, sent: 0, cancelled: 0, retry: 0, failed: 0, lost: 0, released: 0 };
   for (const row of rows) {
-    // Leave before the host's own limit (30 seconds) rather than be cut: what is left keeps its lease and is
-    // taken again by a later run.
+    // Leave before the host's own limit (30 seconds) rather than be cut. With the database on another
+    // continent a reminder costs about a second, so a run may not get through its batch.
     if (Date.now() - started > (options.budgetMs ?? 20000)) break;
     counts[await handle(row, token, options)] += 1;
   }
+  // What this run took and did not reach is given back untouched: it was not an attempt, and the next run
+  // must not have to wait for a lease to run out.
+  counts.released = (await db.run(
+    "UPDATE planned_reminders SET status = 'pending', claim_token = NULL, claimed_until = NULL, attempts = GREATEST(attempts - 1, 0) WHERE status = 'claimed' AND claim_token = ?",
+    [token]
+  )).changes;
   counts.ms = Date.now() - started;
   return counts;
 }
