@@ -123,10 +123,18 @@ async function sendMail({ to, subject, text, html }) {
   if (transport === 'smtp') return sendViaSmtp({ to, subject, text, html });
 
   outbox.push({ to, subject, text, html, at: Date.now() });
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
     console.log(`[LifeAdmin mail:outbox] To: ${to}\nSubject: ${subject}\n${text}\n`);
   }
   return { delivered: true, transport };
+}
+
+// One line for the server console at start-up; null when real mail is configured.
+function startupNotice() {
+  const t = transportName();
+  if (t === 'outbox') return 'Mail: no real email is sent in this mode (outbox). Reset links and codes are printed here in the server console. To send real mail set MAIL_TRANSPORT=smtp plus SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM and APP_BASE_URL in .env.';
+  if (t === 'none') return 'Mail: no provider configured, nothing will be sent.';
+  return null;
 }
 
 function getOutbox() {
@@ -137,4 +145,4 @@ function clearOutbox() {
   outbox.length = 0;
 }
 
-module.exports = { sendMail, getOutbox, clearOutbox, transportName };
+module.exports = { sendMail, getOutbox, clearOutbox, transportName, startupNotice };

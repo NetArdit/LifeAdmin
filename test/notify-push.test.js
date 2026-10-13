@@ -317,6 +317,23 @@ test('notifications on devices: circle events and reminders', async (t) => {
     }
   });
 
+  await t.test('a push service that keeps the call open is given up on after a fixed time, and the attempt counts', async () => {
+    const me = await person('Ilir');
+    const id = (await db.run("INSERT INTO notifications (user_id, type, title, push_status) VALUES (?, 'ai', 'Diçka', 'pending')", [me.id])).lastInsertRowid;
+    process.env.TEST_PUSH_DEADLINE_MS = '80';
+    const undo = push.setSender(() => new Promise(() => {}));
+    try {
+      const started = Date.now();
+      assert.equal(await notify.deliverPush(id), 'retry');
+      assert.ok(Date.now() - started < 3000, 'did not wait for an answer that never comes');
+      const row = await db.get('SELECT push_status, push_attempts FROM notifications WHERE id = ?', [id]);
+      assert.deepEqual([row.push_status, row.push_attempts], ['pending', 1]);
+    } finally {
+      undo();
+      delete process.env.TEST_PUSH_DEADLINE_MS;
+    }
+  });
+
   await t.test('a comment on a task that was made private before the push went out reaches only who can still open it', async () => {
     const { arta, besnik, drita, family } = await circle();
     const task = (await arta.c.post('/api/tasks', { title: 'Dhurata për Dritën', familyId: family.id, visibility: 'family' })).data.task;

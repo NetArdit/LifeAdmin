@@ -7,7 +7,10 @@ const http = require('node:http');
 const zlib = require('node:zlib');
 const { startApp, makeClient, signUp } = require('./helpers');
 
-const ahead = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+// Counted from the day the application itself calls today (its own clock, not UTC): between midnight and
+// the hour UTC catches up, the two differ by a day.
+const { todayISO, addDays } = require('../src/lib/dates');
+const ahead = (days) => addDays(todayISO(), days);
 
 /** A small real PNG: every checksum right. */
 function png(grey = 128, size = 8) {
@@ -28,6 +31,8 @@ function png(grey = 128, size = 8) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 const file = (grey) => ({ contentType: 'image/png', data: png(grey).toString('base64') });
+/** A reading the person agreed to. */
+const scanOf = (grey) => ({ file: file(grey), consent: true });
 
 test('documents and their dates', async (t) => {
   // The AI provider is a local stand-in: no picture leaves this machine.
@@ -125,30 +130,14 @@ test('documents and their dates', async (t) => {
     assert.equal((await planned(withFile.id)).length, 0);
   });
 
-  await t.test('a PDF is kept as the file it is and only ever handed back as a download; one with scripts, or that is not a PDF, is refused', async () => {
-    const pdfOf = (body) => Buffer.from(`%PDF-1.7\n1 0 obj\n<< /Type /Catalog ${body} >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`, 'latin1');
-    const asFile = (bytes) => ({ contentType: 'application/pdf', data: bytes.toString('base64') });
-    const good = pdfOf('/Pages 2 0 R');
-    const made = await me.post('/api/documents', { title: 'Polica si PDF', kind: 'insurance', expiresOn: ahead(50), file: asFile(good) });
-    assert.equal(made.status, 201);
-    const stored = made.data.document.files[0];
-    assert.equal(stored.contentType, 'application/pdf');
-    const got = await fetch(app.base + stored.url, { headers: { cookie: me.cookie() } });
-    assert.equal(got.headers.get('content-type'), 'application/pdf');
-    assert.match(got.headers.get('content-disposition'), /^attachment; filename="document-\d+\.pdf"$/);
-    assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
-    assert.ok(Buffer.from(await got.arrayBuffer()).equals(good));
-    assert.equal((await fetch(app.base + stored.url, { headers: { cookie: other.cookie() } })).status, 404);
-
-    for (const bad of [pdfOf('/OpenAction << /S /JavaScript /JS (app.alert(1)) >>'), pdfOf('/AA << /O << /S /Launch /F (cmd.exe) >> >>'), pdfOf('/AcroForm << /XFA 3 0 R >>'), Buffer.from('<html>%PDF-1.7 %%EOF'), Buffer.from('%PDF-1.7 no end'), png(3)]) {
-      assert.equal((await me.post(`/api/documents/${made.data.document.id}/files`, { file: asFile(bad) })).status, 400);
-    }
-    // Larger than a PDF may be.
-    const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(2200000, 0x20), Buffer.from('\n%%EOF\n')]);
-    assert.equal((await me.post(`/api/documents/${made.data.document.id}/files`, { file: asFile(big) })).status, 413);
-    // A scan reads pictures only: the page draws a PDF's first page and sends that.
-    assert.equal((await me.post('/api/documents/scan', { file: asFile(good) })).status, 400);
-    assert.equal((await me.del(`/api/documents/${made.data.document.id}`)).status, 200);
+  await t.test('a PDF is never stored: the page keeps a picture of its first page instead', async () => {
+    const pdf = Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n', 'latin1').toString('base64');
+    const made = (await me.post('/api/documents', { title: 'Polica', kind: 'insurance', expiresOn: ahead(50) })).data.document;
+    assert.equal((await me.post(`/api/documents/${made.id}/files`, { file: { contentType: 'application/pdf', data: pdf } })).status, 400);
+    assert.equal((await me.post('/api/documents', { title: 'Polica 2', file: { contentType: 'application/pdf', data: pdf } })).status, 400);
+    assert.equal((await me.post('/api/documents/scan', { file: { contentType: 'application/pdf', data: pdf }, consent: true })).status, 400);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM document_files')).c, 0);
+    assert.equal((await me.del(`/api/documents/${made.id}`)).status, 200);
   });
 
   await t.test('renewed, the reminders move to the new date; archived or without a date, there are none', async () => {
@@ -184,16 +173,34 @@ test('documents and their dates', async (t) => {
     assert.equal((await worker.runDue({ now: Date.parse(rows[1].scheduled_at) + 90000 })).claimed, 0);
   });
 
-  await t.test('a scan offers what was read and stores nothing: neither the picture nor the answer', async () => {
+  await t.test('a picture is sent to be read only with the person\'s consent, and the page is told to whom', async () => {
+    assert.equal((await me.get('/api/documents')).data.scan.provider, 'Groq');
+    seen.length = 0;
+    for (const consent of [undefined, false, 'true', 1]) {
+      const res = await me.post('/api/documents/scan', { file: file(60), consent });
+      assert.equal(res.status, 400, String(consent));
+      assert.match(res.data.error, /sent to Groq/);
+    }
+    assert.equal(seen.length, 0, 'nothing left this server');
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM document_scans')).c, 0);
+  });
+
+  await t.test('a scan offers what was read and stores neither the picture nor the words: only a ticket', async () => {
     const before = (await db.get('SELECT COUNT(*) AS c FROM documents')).c;
     seen.length = 0;
     answers = [{ status: 200, content: { readable: true, kind: 'insurance', title: '  Sigurimi   kasko ', issuer: 'Sigal', issuedOn: '2026-01-15', expiresOn: ahead(95), doubts: [] } }];
-    const res = await me.post('/api/documents/scan', { file: file(60) });
+    const res = await me.post('/api/documents/scan', scanOf(60));
     assert.equal(res.status, 200);
     assert.equal(res.data.ok, true);
+    assert.equal(res.data.provider, 'Groq');
+    assert.match(res.data.ticket, /^[A-Za-z0-9_-]{32}$/);
     assert.deepEqual(res.data.suggestion, { kind: 'insurance', title: 'Sigurimi kasko', issuer: 'Sigal', issuedOn: '2026-01-15', expiresOn: ahead(95), reminderDays: [30, 7, 0], warnings: [] });
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM documents')).c, before);
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM document_files')).c, 0);
+    // The ticket's row: who, to whom, the dates offered. Not the ticket itself, not the title, not the picture.
+    const row = await db.get('SELECT * FROM document_scans WHERE user_id = ?', [myId]);
+    assert.deepEqual([row.provider, row.offered_expires_on, row.offered_issued_on, row.used_at], ['Groq', ahead(95), '2026-01-15', null]);
+    assert.ok(!JSON.stringify(row).includes(res.data.ticket) && !JSON.stringify(row).includes('kasko'));
 
     // What went to the provider: the picture as a data address, and the instruction to leave names and numbers out.
     assert.equal(seen.length, 1);
@@ -206,7 +213,7 @@ test('documents and their dates', async (t) => {
 
   await t.test('what the AI read is made harmless and every doubt is said: dates that do not exist, a past year, an unknown kind', async () => {
     answers = [{ status: 200, content: { readable: false, kind: 'insurance', title: 'x'.repeat(300), issuer: null, issuedOn: '15.01.2026', expiresOn: '2026-02-31', doubts: ['The year is partly covered by a stamp.'] } }];
-    let s = (await me.post('/api/documents/scan', { file: file(61) })).data.suggestion;
+    let s = (await me.post('/api/documents/scan', scanOf(61))).data.suggestion;
     assert.equal(s.title.length, 120);
     assert.deepEqual([s.issuedOn, s.expiresOn], [null, null]);
     assert.ok(s.warnings.some((w) => /hard to read/.test(w)));
@@ -216,50 +223,107 @@ test('documents and their dates', async (t) => {
     assert.ok(s.warnings.includes('The year is partly covered by a stamp.'));
 
     answers = [{ status: 200, content: { readable: true, kind: 'warranty', title: 'Garancia', issuer: null, issuedOn: '2024-05-01', expiresOn: '2023-05-01', doubts: [] } }];
-    s = (await me.post('/api/documents/scan', { file: file(62) })).data.suggestion;
+    s = (await me.post('/api/documents/scan', scanOf(62))).data.suggestion;
+
+    // A number the model returned although it was told not to does not get into the name.
+    answers = [{ status: 200, content: { readable: true, kind: 'passport', title: 'Pasaporta P01234567', issuer: 'MPB 1234567890', issuedOn: null, expiresOn: ahead(900), doubts: [] } }];
+    const clean = (await me.post('/api/documents/scan', scanOf(65))).data.suggestion;
+    assert.deepEqual([clean.title, clean.issuer], ['Pasaporta P', 'MPB']);
     assert.ok(s.warnings.some((w) => /not after the date of issue/.test(w)));
     assert.ok(s.warnings.some((w) => /already in the past/.test(w)));
 
     // An answer of another shape (a kind that does not exist) is asked for once more, then refused: never passed on.
     answers = [{ status: 200, content: { readable: true, kind: 'spaceship', title: 'X', issuer: null, issuedOn: null, expiresOn: null, doubts: [] } }, { status: 200, content: { hello: 'world' } }];
-    const refused = (await me.post('/api/documents/scan', { file: file(63) })).data;
+    const refused = (await me.post('/api/documents/scan', scanOf(63))).data;
+    assert.equal(refused.ticket, undefined);
     assert.equal(refused.ok, false);
     assert.equal(refused.suggestion, undefined);
 
     // The provider is down: a clear answer, and typing by hand still works.
     answers = [{ status: 503, content: '' }];
-    const down = (await me.post('/api/documents/scan', { file: file(64) })).data;
+    const down = (await me.post('/api/documents/scan', scanOf(64))).data;
     assert.equal(down.ok, false);
     assert.doesNotMatch(down.error, /provider detail/);
   });
 
-  await t.test('a scanned document is saved only after the person confirmed it, and it is on record that they did', async () => {
-    const fields = { title: 'Sigurimi kasko', kind: 'insurance', issuer: 'Sigal', expiresOn: ahead(95), source: 'scan', file: file(60) };
-    for (const reviewed of [undefined, false, 'true', 1]) {
-      const res = await me.post('/api/documents', { ...fields, reviewed });
-      assert.equal(res.status, 400, String(reviewed));
-      assert.equal(res.data.fields.reviewed, 'Required');
-    }
+  await t.test('a document is saved "from a scan" only with that scan\'s ticket and a confirmation of the very date being saved', async () => {
+    await db.run('DELETE FROM document_scans');
+    const read = async (expiresOn) => {
+      answers = [{ status: 200, content: { readable: true, kind: 'insurance', title: 'Sigurimi kasko', issuer: 'Sigal', issuedOn: null, expiresOn, doubts: [] } }];
+      return (await me.post('/api/documents/scan', scanOf(60))).data;
+    };
+    const day = ahead(95);
+    const { ticket } = await read(day);
+    const fields = { title: 'Sigurimi kasko', kind: 'insurance', issuer: 'Sigal', expiresOn: day, file: file(60) };
+    const refused = [
+      { ticket },
+      { ticket, confirmed: {} },
+      { ticket, confirmed: { details: false, expiresOn: day } },
+      { ticket, confirmed: { details: 'yes', expiresOn: day } },
+      { ticket, confirmed: { details: true } },
+      { ticket, confirmed: { details: true, expiresOn: ahead(96) } },
+      { ticket, confirmed: { details: true, expiresOn: null } },
+      { ticket: 'made-up-ticket-that-nobody-was-given', confirmed: { details: true, expiresOn: day } },
+      { confirmed: { details: true, expiresOn: day } },
+      'yes',
+    ];
+    for (const scan of refused) assert.equal((await me.post('/api/documents', { ...fields, scan })).status, 400, JSON.stringify(scan).slice(0, 70));
+    // The date in the form was changed after it was confirmed: refused, although the confirmation was complete.
+    assert.equal((await me.post('/api/documents', { ...fields, expiresOn: ahead(120), scan: { ticket, confirmed: { details: true, expiresOn: day } } })).status, 400);
+    // Somebody else's ticket is nobody's ticket.
+    assert.equal((await other.post('/api/documents', { ...fields, scan: { ticket, confirmed: { details: true, expiresOn: day } } })).status, 400);
     assert.equal((await db.get("SELECT COUNT(*) AS c FROM documents WHERE source = 'scan'")).c, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM document_files')).c, 0);
+    assert.equal((await db.get('SELECT used_at FROM document_scans')).used_at, null, 'a refused save does not use the ticket up');
 
-    const saved = await me.post('/api/documents', { ...fields, reviewed: true });
+    // The word "scan" from the client decides nothing: without a ticket this is a document typed by hand.
+    const byHand = await me.post('/api/documents', { ...fields, source: 'scan', reviewed: true, file: undefined });
+    assert.equal(byHand.status, 201);
+    assert.deepEqual([byHand.data.document.source, byHand.data.document.reviewedAt], ['manual', null]);
+    await me.del(`/api/documents/${byHand.data.document.id}`);
+
+    const saved = await me.post('/api/documents', { ...fields, scan: { ticket, confirmed: { details: true, expiresOn: day } } });
     assert.equal(saved.status, 201);
     assert.equal(saved.data.document.source, 'scan');
     assert.ok(saved.data.document.reviewedAt);
     assert.equal(saved.data.document.files.length, 1);
     assert.equal((await planned(saved.data.document.id)).length, 3);
+    assert.equal((await db.get('SELECT expiry_as_read FROM documents WHERE id = ?', [saved.data.document.id])).expiry_as_read, 1);
+    // One reading, one document.
+    assert.equal((await me.post('/api/documents', { ...fields, file: undefined, scan: { ticket, confirmed: { details: true, expiresOn: day } } })).status, 400);
+
+    // The person corrected the date the machine read: saved with theirs, and on record that it differed.
+    const second = await read(ahead(40));
+    const corrected = await me.post('/api/documents', { title: 'Kontrolli teknik', kind: 'vehicle_inspection', expiresOn: ahead(45), scan: { ticket: second.ticket, confirmed: { details: true, expiresOn: ahead(45) } } });
+    assert.equal(corrected.status, 201);
+    assert.equal((await db.get('SELECT expiry_as_read FROM documents WHERE id = ?', [corrected.data.document.id])).expiry_as_read, 0);
+
+    // A document that has no last day, confirmed as such.
+    const third = await read(null);
+    const undated = await me.post('/api/documents', { title: 'Kontrata e qirasë', kind: 'contract', expiresOn: null, scan: { ticket: third.ticket, confirmed: { details: true, expiresOn: null } } });
+    assert.equal(undated.status, 201);
+    assert.equal((await planned(undated.data.document.id)).length, 0);
+
+    // A ticket is good for an hour.
+    const late = await read(day);
+    await db.run("UPDATE document_scans SET created_at = datetime('now', '-61 minutes') WHERE used_at IS NULL");
+    assert.equal((await me.post('/api/documents', { ...fields, file: undefined, scan: { ticket: late.ticket, confirmed: { details: true, expiresOn: day } } })).status, 400);
+
     // The database itself refuses a scanned document that nobody confirmed, whoever writes the row.
     await assert.rejects(db.run("INSERT INTO documents (owner_id, title, source) VALUES (?, 'Pa konfirmim', 'scan')", [myId]));
+    // And the clock sweeps old tickets away.
+    await db.run("UPDATE document_scans SET created_at = datetime('now', '-2 days')");
+    await worker.housekeeping();
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM document_scans')).c, 0);
   });
 
   await t.test('scanning is not for somebody who turned AI off, not without a picture, and not without end', async () => {
-    assert.equal((await me.post('/api/documents/scan', {})).status, 400);
-    assert.equal((await me.post('/api/documents/scan', { file: { contentType: 'image/png', data: Buffer.from('not a picture').toString('base64') } })).status, 400);
+    assert.equal((await me.post('/api/documents/scan', { consent: true })).status, 400);
+    assert.equal((await me.post('/api/documents/scan', { consent: true, file: { contentType: 'image/png', data: Buffer.from('not a picture').toString('base64') } })).status, 400);
 
     seen.length = 0;
     await other.patch('/api/settings/preferences', { aiEnabled: false });
-    const off = (await other.post('/api/documents/scan', { file: file(1) })).data;
+    const off = (await other.post('/api/documents/scan', scanOf(1))).data;
     assert.equal(off.ok, false);
     assert.equal(seen.length, 0, 'nothing was sent to the provider');
 
@@ -267,9 +331,9 @@ test('documents and their dates', async (t) => {
     await resetAllLimits();
     await db.run("DELETE FROM rate_limits WHERE bucket = 'documentScan'");
     answers = Array.from({ length: 12 }, () => ({ status: 200, content: { readable: true, kind: 'other', title: 'X', issuer: null, issuedOn: null, expiresOn: null, doubts: [] } }));
-    for (let i = 0; i < 12; i++) assert.equal((await me.post('/api/documents/scan', { file: file(i) })).status, 200);
+    for (let i = 0; i < 12; i++) assert.equal((await me.post('/api/documents/scan', scanOf(i))).status, 200);
     seen.length = 0;
-    const over = await me.post('/api/documents/scan', { file: file(99) });
+    const over = await me.post('/api/documents/scan', scanOf(99));
     assert.equal(over.status, 429);
     assert.equal(seen.length, 0);
   });
@@ -295,6 +359,8 @@ test('documents and their dates', async (t) => {
     const backup = await exportBackup();
     assert.ok(backup.tables.documents.length >= 3);
     assert.ok(backup.tables.document_files.length >= 2);
+    assert.equal(backup.tables.document_scans, undefined, 'tickets of scans are not carried');
+    assert.ok(!JSON.stringify(backup.tables.documents).includes('reference'));
     const mineBefore = (await db.get('SELECT COUNT(*) AS c FROM documents WHERE owner_id = ?', [myId])).c;
     assert.ok(mineBefore >= 2);
     await db.run('DELETE FROM users WHERE id = ?', [myId]);

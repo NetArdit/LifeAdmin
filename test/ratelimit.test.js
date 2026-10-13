@@ -66,11 +66,12 @@ test('limits counted in the database', async (t) => {
     const c = makeClient(app.base);
     const { payload } = await signUp(c);
     const guess = (password) => makeClient(app.base).post('/api/auth/login', { identifier: payload.email, password });
-    for (let i = 0; i < 5; i++) assert.equal((await guess('gabim')).status, 400);
+    for (let i = 0; i < 7; i++) assert.equal((await guess('gabim')).status, 400);
     for (let i = 0; i < 12; i++) assert.equal((await guess(payload.password)).status, 200);
     // The whole allowance is there again.
     for (let i = 0; i < 8; i++) assert.equal((await guess('gabim')).status, 400);
     assert.equal((await guess('gabim')).status, 429);
+    assert.equal((await guess(payload.password)).status, 429, 'locked until the window ends');
   });
 
   await t.test('a wrong invite code is counted before it is looked at; a right one gives its count back', async () => {

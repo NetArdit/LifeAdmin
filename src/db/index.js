@@ -152,6 +152,8 @@ async function open() {
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_attempts INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_retry_at TEXT;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_claim TEXT;
+      -- Only now do these columns exist in a database made by an earlier version.
+      CREATE INDEX IF NOT EXISTS idx_notif_push_owed ON notifications(id) WHERE push_status = 'pending';
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS claim_token TEXT;
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS last_error TEXT;

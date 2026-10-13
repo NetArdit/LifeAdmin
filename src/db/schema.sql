@@ -148,7 +148,9 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at);
-CREATE INDEX IF NOT EXISTS idx_notif_push_owed ON notifications(id) WHERE push_status = 'pending';
+-- (The index over owed pushes is created in src/db/index.js, after the columns it names have been added to
+-- a table that already existed. Nothing in THIS file may name a column that an older database lacks: here
+-- only whole new tables and indexes over columns a table has had from its first version.)
 
 CREATE TABLE IF NOT EXISTS bills (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,13 +351,13 @@ CREATE TABLE IF NOT EXISTS documents (
   title TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'other', -- passport | id_card | driving_licence | vehicle_registration | vehicle_inspection | insurance | warranty | contract | subscription | medical | other
   issuer TEXT,
-  reference TEXT, -- a number the person chose to note (a policy, a plate): optional, typed by them, never read by the AI
   issued_on TEXT,
   expires_on TEXT, -- the last day it is valid; without one there is nothing to remind of
   reminder_days TEXT NOT NULL DEFAULT '[30,7,0]', -- days before expires_on, as a JSON list
   notes TEXT,
   source TEXT NOT NULL DEFAULT 'manual', -- manual | scan (its fields were first read from a picture by the AI)
   reviewed_at TEXT, -- when a person confirmed what was read from the picture; a scanned document always has it
+  expiry_as_read INTEGER, -- scanned documents: 1 if the person kept the last day the machine read, 0 if they corrected it
   status TEXT NOT NULL DEFAULT 'active', -- active | archived
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -365,9 +367,9 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id, expires_on);
 
--- A picture of a document, or the document itself as a PDF file. Kept in the database as base64 text so that
--- it is covered by the same access rule, the same backup and the same deletion as the document itself. Room
--- is the price: a picture of at most 1 MB, a PDF of at most 2 MB,
+-- A picture of a document (a PDF is never stored: the page keeps a picture of its first page). Kept in the
+-- database as base64 text so that it is covered by the same access rule, the same backup and the same
+-- deletion as the document itself. Room is the price: at most 1 MB each,
 -- two per document, 20 MB per person and 200 MB for everybody (the route holds these; a hosted database of
 -- half a gigabyte has no room for more).
 CREATE TABLE IF NOT EXISTS document_files (
@@ -378,8 +380,23 @@ CREATE TABLE IF NOT EXISTS document_files (
   size_bytes INTEGER NOT NULL,
   data_base64 TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
-  CHECK (size_bytes BETWEEN 1 AND 2097152)
+  CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  CHECK (size_bytes BETWEEN 1 AND 1048576)
 );
 CREATE INDEX IF NOT EXISTS idx_document_files_document ON document_files(document_id);
 CREATE INDEX IF NOT EXISTS idx_document_files_owner ON document_files(owner_id);
+
+-- A ticket for each time a person had a picture read by the AI service. It holds no picture and none of the
+-- words that were read: who, when, which provider, and the two dates that were offered. Saving a document
+-- "from a scan" takes one unused ticket of the last hour (routes/documents.js). Old ones are swept away.
+CREATE TABLE IF NOT EXISTS document_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ticket_hash TEXT NOT NULL UNIQUE, -- SHA-256 of the ticket the page holds
+  provider TEXT, -- whom the picture was sent to
+  offered_expires_on TEXT,
+  offered_issued_on TEXT,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_document_scans_user ON document_scans(user_id);

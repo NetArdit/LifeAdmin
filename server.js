@@ -12,7 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // A picture of a document travels as base64 inside JSON: these routes alone take a larger body.
-app.use('/api/documents', express.json({ limit: '4mb' }));
+app.use('/api/documents', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(attachUser);
@@ -63,8 +63,16 @@ app.use(errorHandler);
 // `npm start`) — exporting `app` lets the test suite mount it on an
 // ephemeral port instead, with no change to normal runtime behavior.
 if (require.main === module) {
+  require('./src/db')
+    .ready()
+    .catch((err) => {
+      console.error('\n[LifeAdmin] THE DATABASE COULD NOT BE OPENED OR BROUGHT UP TO DATE. Nothing will work until this is fixed:');
+      console.error(`  ${(err && err.message) || err}\n`);
+    });
   app.listen(PORT, () => {
     console.log(`LifeAdmin running at http://localhost:${PORT}`);
+    const mailNotice = require('./src/lib/mailer').startupNotice();
+    if (mailNotice) console.log(mailNotice);
     if (!ai.isConfigured()) {
       console.log('AI features disabled — set GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env to enable the assistant.');
     }

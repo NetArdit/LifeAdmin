@@ -16,7 +16,8 @@
     "push:keys": "node scripts/push-keys.cjs",
     "db:backup": "node scripts/backup.cjs backup",
     "db:restore": "node scripts/backup.cjs restore",
-    "db:migrate": "node scripts/migrate.cjs"
+    "db:migrate": "node scripts/migrate.cjs",
+    "db:import-sqlite": "node scripts/import-sqlite.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",

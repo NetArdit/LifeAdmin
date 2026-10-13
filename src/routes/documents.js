@@ -3,22 +3,28 @@
 //
 // A document is a title, what kind it is, the day it runs out, and when to be reminded before that day
 // (several times: a passport wants three months' notice, and a word on the day). A picture of it can be
-// kept with it.
+// kept with it. No number of the document is kept: a reminder needs none, and a passport number in a table
+// is a risk without a use.
 //
 // "Scan": a picture is read by the AI service and what it found is OFFERED, never stored. The person sees
-// the picture beside the fields, corrects them and confirms; only then is the document saved, and it is on
-// record that a person confirmed it (reviewed_at). A document that came from a scan cannot be created
-// without that confirmation: a date misread by a machine would be a reminder on the wrong day, which is
-// worse than none.
+// the picture beside the fields, corrects them and confirms; only then is the document saved.
+//
+// What "confirmed" means here, exactly:
+//   - reading a picture needs the person's consent to send it to the named provider, each time;
+//   - each reading gets a ticket (document_scans) that belongs to that person, is good for an hour and for
+//     one document. Saving "from a scan" needs that ticket, so what is recorded as scanned and confirmed
+//     really followed a scan by that person;
+//   - the confirmation names the last day of validity it is for. If the date being saved is not the date
+//     that was confirmed, the save is refused: the date cannot change between the tick and the save;
+//   - a document typed in by hand is a different thing and is recorded as such. Nothing can stop somebody
+//     from reading a suggestion and typing it in by hand; that is typing, and it is their own account.
+// No software can know that a person really looked. This makes sure they were asked, about the right date.
 //
 // Pictures are kept in the database (see the note on room in schema.sql): a few per document, small, and
-// with a ceiling per person and for everybody together. Only their owner is ever served one.
-//
-// A PDF can be kept too, as the file it is. Reading one is the page's work: it draws the first page as a
-// picture and sends that to be read, so the server reads pictures only. A PDF is a program-like format: it
-// is stored only if it is plainly a PDF without scripts or actions, and it is only ever handed back as a
-// download, never opened inside this site.
+// with a ceiling per person and for everybody together. Only their owner is ever served one. A PDF is never
+// stored: the page draws its first page as a picture, and that picture is what is read and kept.
 
+const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
 const { asyncRoute, txRoute } = require('../middleware/errorHandler');
@@ -49,9 +55,9 @@ const DEFAULT_REMINDER_DAYS = {
 };
 
 const MAX_FILE_BYTES = 1048576; // 1 MB each: the page makes a picture small before sending it
-const MAX_PDF_BYTES = 2097152; // a PDF cannot be made smaller here: 2 MB, or the page keeps a picture of its first page instead
 const MAX_FILES_PER_DOCUMENT = 2; // a front and a back
 const MAX_DOCUMENTS = 200;
+const SCAN_TICKET_MINUTES = 60;
 const megabytes = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback) * 1048576;
 const maxUserBytes = () => megabytes('DOCUMENTS_MAX_MB_PER_USER', 20);
 const maxTotalBytes = () => megabytes('DOCUMENTS_MAX_MB_TOTAL', 200);
@@ -91,32 +97,6 @@ function picture(input, field = 'file') {
   return { contentType: input.contentType, bytes };
 }
 
-/**
- * A PDF from the client, as bytes. Not a proof that the file is harmless: the header and the end are where
- * the format puts them, and the names that make a PDF do things by itself (scripts, launching, forms that
- * send) do not occur in it. Such names can be hidden inside compressed parts, which is why a stored PDF is
- * never opened inside this site (see the route that serves it).
- */
-function pdf(input, field = 'file') {
-  const tooLarge = () => Object.assign(new ValidationError('The PDF is too large. At most 2 MB.', { [field]: 'Too large' }), { status: 413 });
-  if (typeof input.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.data)) throw new ValidationError('That file is not a PDF.', { [field]: 'Not a PDF' });
-  if (input.data.length > Math.ceil((MAX_PDF_BYTES * 4) / 3) + 8) throw tooLarge();
-  const bytes = Buffer.from(input.data, 'base64');
-  if (bytes.length > MAX_PDF_BYTES) throw tooLarge();
-  const head = bytes.subarray(0, 8).toString('latin1');
-  const tail = bytes.subarray(Math.max(0, bytes.length - 1024)).toString('latin1');
-  if (!/^%PDF-[12]\.\d/.test(head) || !tail.includes('%%EOF')) throw new ValidationError('That file is not a PDF.', { [field]: 'Not a PDF' });
-  if (/\/(JavaScript|JS|Launch|SubmitForm|ImportData|EmbeddedFile|RichMedia|XFA)\b/.test(bytes.toString('latin1'))) {
-    throw new ValidationError('This PDF contains scripts, forms or attachments and cannot be stored. Take a photo of the document instead.', { [field]: 'Not accepted' });
-  }
-  return { contentType: 'application/pdf', bytes };
-}
-
-/** What may be kept with a document: a picture, or a PDF. */
-function keptFile(input, field = 'file') {
-  return input !== null && typeof input === 'object' && input.contentType === 'application/pdf' ? pdf(input, field) : picture(input, field);
-}
-
 function stateOf(doc) {
   if (doc.status === 'archived') return 'archived';
   if (!doc.expires_on) return 'undated';
@@ -131,7 +111,6 @@ function mapDocument(d, files = []) {
     title: d.title,
     kind: d.kind,
     issuer: d.issuer,
-    reference: d.reference,
     issuedOn: d.issued_on,
     expiresOn: d.expires_on,
     daysLeft: d.expires_on ? daysUntil(d.expires_on) : null,
@@ -149,13 +128,14 @@ function mapDocument(d, files = []) {
 
 const filesOf = (ownerId) => db.all('SELECT id, document_id, content_type, size_bytes FROM document_files WHERE owner_id = ? ORDER BY id', [ownerId]);
 const mine = (req) => db.get('SELECT * FROM documents WHERE id = ? AND owner_id = ?', [Number(req.params.id) || 0, req.user.id]);
+const ticketHash = (ticket) => crypto.createHash('sha256').update(String(ticket)).digest('hex');
 
 /** Stores a picture with a document, inside the caller's transaction, within the three ceilings. */
 async function storeFile(ownerId, documentId, { contentType, bytes }) {
   // The ceilings are sums over many rows: everybody who adds a picture waits here for the one before.
   await db.get("SELECT pg_advisory_xact_lock(hashtext('document_files_total'))");
   const have = (await db.get('SELECT COUNT(*) AS n FROM document_files WHERE document_id = ?', [documentId])).n;
-  if (have >= MAX_FILES_PER_DOCUMENT) throw new ValidationError(`A document holds at most ${MAX_FILES_PER_DOCUMENT} files.`, { file: 'Too many' });
+  if (have >= MAX_FILES_PER_DOCUMENT) throw new ValidationError(`A document holds at most ${MAX_FILES_PER_DOCUMENT} pictures.`, { file: 'Too many' });
   const own = (await db.get('SELECT COALESCE(SUM(size_bytes), 0) AS n FROM document_files WHERE owner_id = ?', [ownerId])).n;
   if (Number(own) + bytes.length > maxUserBytes()) throw new ValidationError('Your room for pictures of documents is full. Remove pictures you no longer need.', { file: 'No room' });
   const all = (await db.get('SELECT COALESCE(SUM(size_bytes), 0) AS n FROM document_files')).n;
@@ -178,19 +158,25 @@ router.get(
       kinds: KINDS,
       defaultReminderDays: DEFAULT_REMINDER_DAYS,
       reminderDayChoices: DOCUMENT_REMINDER_DAYS,
-      room: { usedBytes: used, maxBytes: maxUserBytes(), maxFileBytes: MAX_FILE_BYTES, maxPdfBytes: MAX_PDF_BYTES, maxFilesPerDocument: MAX_FILES_PER_DOCUMENT },
-      scan: { available: ai.isConfigured() && !ai.userAiDisabled(req.user) },
+      room: { usedBytes: used, maxBytes: maxUserBytes(), maxFileBytes: MAX_FILE_BYTES, maxFilesPerDocument: MAX_FILES_PER_DOCUMENT },
+      // Who would be sent the picture: the page names them before anything is sent.
+      scan: { available: ai.isConfigured() && !ai.userAiDisabled(req.user), provider: ai.providerName() },
     });
   })
 );
 
-// Reads a picture and OFFERS what it found. Nothing is stored here: neither the picture nor the answer.
+// Reads a picture and OFFERS what it found. Neither the picture nor what was read is stored here: only a
+// ticket that says this person had a picture read just now (and which dates were offered, to be able to
+// tell later whether the person changed them).
 router.post(
   '/scan',
   asyncRoute(async (req, res) => {
     if (ai.userAiDisabled(req.user)) return res.json(ai.AI_DISABLED_BY_USER);
     if (!ai.isConfigured()) return res.json({ ok: false, error: 'Reading a picture needs the AI service, which is not set up here. You can type the details in yourself.' });
-    const file = picture((req.body || {}).file);
+    const b = req.body || {};
+    // The picture leaves this site for another company's. Not without the person saying so, each time.
+    if (b.consent !== true) throw new ValidationError(`Confirm that the picture may be sent to ${ai.providerName()} to be read.`, { consent: 'Required' });
+    const file = picture(b.file);
     const key = `scan|${req.user.id}`;
     if (await scanLimit.consume(key)) {
       res.set('Retry-After', String(await scanLimit.retryAfterSeconds(key)));
@@ -198,17 +184,29 @@ router.post(
     }
     const result = await ai.readDocument({ contentType: file.contentType, data: file.bytes.toString('base64'), today: todayISO() });
     if (!result.ok) return res.json(result);
-    res.json({ ok: true, suggestion: checkedSuggestion(result.data) });
+    const suggestion = checkedSuggestion(result.data);
+    const ticket = crypto.randomBytes(24).toString('base64url');
+    await db.run('INSERT INTO document_scans (user_id, ticket_hash, provider, offered_expires_on, offered_issued_on) VALUES (?, ?, ?, ?, ?)', [
+      req.user.id,
+      ticketHash(ticket),
+      ai.providerName(),
+      suggestion.expiresOn,
+      suggestion.issuedOn,
+    ]);
+    res.json({ ok: true, suggestion, ticket, provider: ai.providerName() });
   })
 );
 
 /**
- * What the AI read is a guess. Here it is made harmless (only known kinds, only real dates, short texts) and
- * every doubt is put into words for the person who is about to check it. Nothing here makes it trustworthy.
+ * What the AI read is a guess. Here it is made harmless (only known kinds, only real dates, short texts with
+ * no long runs of digits) and every doubt is put into words for the person who is about to check it.
+ * Nothing here makes it trustworthy.
  */
 function checkedSuggestion(raw) {
   const warnings = [];
-  const short = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, max) : null);
+  // The model is told to leave numbers out. If it did not, a run of digits (a document or personal number)
+  // does not get into a name.
+  const short = (v, max) => (typeof v === 'string' && v.trim() ? v.replace(/\d[\d\s./-]{4,}\d/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) || null : null);
   const day = (v, label) => {
     if (v === null || v === undefined || v === '') return null;
     if (isDate(v)) return v;
@@ -245,11 +243,34 @@ function fieldsFrom(b, { partial = false } = {}) {
     out.kind = b.kind || 'other';
   }
   if (!partial || b.issuer !== undefined) out.issuer = text(b.issuer, 'issuer', 'The issuer', 120);
-  if (!partial || b.reference !== undefined) out.reference = text(b.reference, 'reference', 'The number', 60);
   if (!partial || b.issuedOn !== undefined) out.issued_on = date(b.issuedOn, 'issuedOn', 'The date of issue');
   if (!partial || b.expiresOn !== undefined) out.expires_on = date(b.expiresOn, 'expiresOn', 'The expiry date');
   if (!partial || b.notes !== undefined) out.notes = text(b.notes, 'notes', 'The note', 1000);
   return out;
+}
+
+/**
+ * A document that is saved "from a scan": the ticket of a reading this person had done within the hour,
+ * not used before, and a confirmation of the details and of this very date. Takes the ticket (one document
+ * per reading). Answers the ticket's row, or throws.
+ */
+async function confirmedScan(userId, scan, expiresOn) {
+  const again = () => new ValidationError('The reading of this picture is no longer valid. Scan the document again, or add it by hand.', { scan: 'Expired' });
+  if (scan === null || typeof scan !== 'object' || typeof scan.ticket !== 'string') throw again();
+  const confirmed = scan.confirmed;
+  if (confirmed === null || typeof confirmed !== 'object' || confirmed.details !== true) {
+    throw new ValidationError('Check what was read from the picture and confirm it before saving.', { confirmed: 'Required' });
+  }
+  // The date that was confirmed is the date that is saved, or nothing is saved. (null: "it has no last day".)
+  if (!('expiresOn' in confirmed) || (confirmed.expiresOn ?? null) !== (expiresOn ?? null)) {
+    throw new ValidationError('Confirm the last day of validity as it is now in the form.', { confirmed: 'The date changed after it was confirmed' });
+  }
+  const row = await db.get(
+    `UPDATE document_scans SET used_at = datetime('now') WHERE user_id = ? AND ticket_hash = ? AND used_at IS NULL AND created_at > datetime('now', '-${SCAN_TICKET_MINUTES} minutes') RETURNING id, offered_expires_on`,
+    [userId, ticketHash(scan.ticket)]
+  );
+  if (!row) throw again();
+  return row;
 }
 
 router.post(
@@ -258,18 +279,30 @@ router.post(
     const b = req.body || {};
     const f = fieldsFrom(b);
     if (f.issued_on && f.expires_on && f.expires_on <= f.issued_on) throw new ValidationError('The expiry date must be after the date of issue.', { expiresOn: 'Check the dates' });
-    const source = b.source === 'scan' ? 'scan' : 'manual';
-    // What a machine read is saved only after a person said they checked it.
-    if (source === 'scan' && b.reviewed !== true) throw new ValidationError('Check what was read from the picture and confirm it before saving.', { reviewed: 'Required' });
-    const file = b.file === undefined || b.file === null ? null : keptFile(b.file);
+    const file = b.file === undefined || b.file === null ? null : picture(b.file);
 
     const count = (await db.get('SELECT COUNT(*) AS n FROM documents WHERE owner_id = ?', [req.user.id])).n;
     if (count >= MAX_DOCUMENTS) throw new ValidationError(`You can keep at most ${MAX_DOCUMENTS} documents. Remove one you no longer need.`);
 
+    // Where a document came from is decided by whether it carries a scan's ticket, never by a word from the client.
+    const scan = b.scan === undefined || b.scan === null ? null : await confirmedScan(req.user.id, b.scan, f.expires_on);
     const made = await db.run(
-      `INSERT INTO documents (owner_id, title, kind, issuer, reference, issued_on, expires_on, reminder_days, notes, source, reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${source === 'scan' ? "datetime('now')" : 'NULL'})`,
-      [req.user.id, f.title, f.kind, f.issuer, f.reference, f.issued_on, f.expires_on, JSON.stringify(reminderDays(b.reminderDays, f.kind)), f.notes, source]
+      `INSERT INTO documents (owner_id, title, kind, issuer, issued_on, expires_on, reminder_days, notes, source, reviewed_at, expiry_as_read)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${scan ? "datetime('now')" : 'NULL'}, ?)`,
+      [
+        req.user.id,
+        f.title,
+        f.kind,
+        f.issuer,
+        f.issued_on,
+        f.expires_on,
+        JSON.stringify(reminderDays(b.reminderDays, f.kind)),
+        f.notes,
+        scan ? 'scan' : 'manual',
+        // Whether the person kept the date the machine read, or corrected it: on record, for whoever asks later
+        // how good the reading is.
+        scan ? ((scan.offered_expires_on ?? null) === (f.expires_on ?? null) ? 1 : 0) : null,
+      ]
     );
     const id = made.lastInsertRowid;
     if (file) await storeFile(req.user.id, id, file);
@@ -319,7 +352,7 @@ router.post(
   txRoute(async (req, res) => {
     const doc = await mine(req);
     if (!doc) return res.status(404).json({ error: 'Document not found.' });
-    const id = await storeFile(req.user.id, doc.id, keptFile((req.body || {}).file));
+    const id = await storeFile(req.user.id, doc.id, picture((req.body || {}).file));
     res.status(201).json({ id, document: mapDocument(doc, await filesOf(req.user.id)) });
   })
 );
@@ -331,12 +364,10 @@ router.get(
   asyncRoute(async (req, res) => {
     const row = await db.get('SELECT content_type, data_base64 FROM document_files WHERE id = ? AND document_id = ? AND owner_id = ?', [Number(req.params.fileId) || 0, Number(req.params.id) || 0, req.user.id]);
     if (!row) return res.status(404).json({ error: 'Picture not found.' });
-    const isPdf = row.content_type === 'application/pdf';
     res.set({
       'Content-Type': row.content_type,
       'Cache-Control': 'private, no-store',
-      // A picture is shown; a PDF is handed over as a file to save, never opened inside this site.
-      'Content-Disposition': isPdf ? `attachment; filename="document-${Number(req.params.id)}.pdf"` : 'inline',
+      'Content-Disposition': 'inline',
       'Content-Security-Policy': "default-src 'none'; sandbox",
       'X-Content-Type-Options': 'nosniff',
     });

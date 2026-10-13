@@ -112,7 +112,20 @@ async function statusFor(userId, sessionId) {
 // ---- sending ----------------------------------------------------------------------------------------------
 
 // Replaceable, so that tests never call a push service.
+// How long one call to a push service may take. The library's own timeout only notices a connection that
+// has gone silent; a service that keeps sending a little would keep it open. So the call is also raced
+// against a clock here: after this long the attempt is counted as failed, whatever the other end is doing.
+// (The abandoned call may still finish on its own: that is the "at least once" of notify.js.)
 const SEND_TIMEOUT_MS = 8000;
+function withDeadline(promise, ms) {
+  let timer;
+  const late = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('push service too slow'), { code: 'PUSH_DEADLINE' })), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+// Tests shorten the wait.
+const deadlineMs = () => (process.env.NODE_ENV === 'test' && Number(process.env.TEST_PUSH_DEADLINE_MS) > 0 ? Number(process.env.TEST_PUSH_DEADLINE_MS) : SEND_TIMEOUT_MS);
 let sender = (subscription, payload, options) => require('web-push').sendNotification(subscription, payload, options);
 function setSender(fn) {
   const before = sender;
@@ -149,14 +162,17 @@ async function sendToRow(row, payload, { ttl = 3600, urgency = 'normal' } = {}) 
     return 'gone';
   }
   try {
-    await sender(subscription, payload, {
-      vapidDetails: { subject: cfg.subject, publicKey: cfg.publicKey, privateKey: cfg.privateKey },
-      TTL: ttl,
-      urgency,
-      // A push service that does not answer is given up on: a person has at most MAX_DEVICES devices, so
-      // all of them together stay well inside the two minutes for which a push is held (notify.js).
-      timeout: SEND_TIMEOUT_MS,
-    });
+    // A person has at most MAX_DEVICES devices, so all of them together stay inside the two minutes for
+    // which a push is held (notify.js): ten times eight seconds.
+    await withDeadline(
+      Promise.resolve(sender(subscription, payload, {
+        vapidDetails: { subject: cfg.subject, publicKey: cfg.publicKey, privateKey: cfg.privateKey },
+        TTL: ttl,
+        urgency,
+        timeout: SEND_TIMEOUT_MS,
+      })),
+      deadlineMs()
+    );
     await db.run("UPDATE push_subscriptions SET last_ok_at = datetime('now'), failures = 0 WHERE id = ?", [row.id]);
     return 'sent';
   } catch (err) {

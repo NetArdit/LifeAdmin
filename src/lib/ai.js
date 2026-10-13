@@ -39,6 +39,11 @@ function provider() {
   return null;
 }
 
+/** The company a request would go to, by the name people know it under: said before a picture is sent. */
+function providerName() {
+  return { groq: 'Groq', anthropic: 'Anthropic' }[provider()] || null;
+}
+
 function isConfigured() {
   return provider() !== null;
 }
@@ -382,6 +387,7 @@ async function readDocument({ contentType, data, today }) {
 
 module.exports = {
   readDocument,
+  providerName,
   isConfigured,
   userAiDisabled,
   AI_DISABLED_BY_USER,

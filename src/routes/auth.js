@@ -71,8 +71,11 @@ router.post(
     const idNorm = isEmail(identifier) ? identifier.trim().toLowerCase() : normalizePhone(identifier);
     const limitKey = `${req.ip}|${idNorm}`;
     // The try is counted before the password is looked at, in one statement: tries at the same instant
-    // cannot all pass a check in which none of them has been counted yet. A right password clears the count,
-    // so signing in is never held against the person; over the limit, not even a right one is looked at.
+    // cannot all pass a check in which none of them has been counted yet. A right password clears the
+    // count: somebody who mistyped a few times and then got in starts afresh, and is not locked out by one
+    // more slip a minute later. (A right password arriving among wrong ones therefore clears those too;
+    // whoever can send the right password has no need to guess.) Over the limit, not even a right password
+    // is looked at.
     if (await limits.loginFail.consume(limitKey)) return await tooMany(res, limits.loginFail, limitKey);
 
     const user = await db.get('SELECT * FROM users WHERE email = ? OR phone = ?', [idNorm, idNorm]);

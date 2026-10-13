@@ -130,6 +130,8 @@ async function handle(row, token, { now = Date.now(), deliver = deliverToBell } 
  */
 async function housekeeping() {
   await db.run('DELETE FROM rate_limits WHERE expires_at <= ?', [Date.now()]);
+  // Tickets of document scans are good for an hour; a day later nobody needs to know there was one.
+  await db.run("DELETE FROM document_scans WHERE created_at < datetime('now', '-1 day')");
   return (await db.run("DELETE FROM sessions WHERE expires_at <= datetime('now')")).changes;
 }
 

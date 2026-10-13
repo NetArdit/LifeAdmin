@@ -110,20 +110,25 @@ npm run db:restore -- backups/<name>.json
 
 - A document is a name, a kind (passport, insurance, vehicle inspection, warranty, ...), the last day it is valid
   and the days before it on which to be reminded. Reminders are planned and delivered like all the others.
-- "Scan a document": a picture is sent to the AI service, which answers what kind of document it is and its
-  dates. That answer is only offered: the person sees it beside the picture, corrects it, and must confirm it
-  before anything is saved. The server refuses a scanned document without that confirmation, and so does the
-  database. The model is told not to return names or numbers; a number can be typed in by hand.
-- The picture goes to the configured AI provider (Groq or Anthropic) to be read. Somebody who does not want
-  that adds the document by hand; with AI turned off in Settings, scanning is not offered.
-- On a phone, "Use the camera" opens the phone's own camera (the site never asks for access to it); "Choose a
-  photo or PDF" takes a file. A PDF's first page is drawn in the browser and that picture is what is read; the
-  library that draws it (pdf.js) is served by this site from `public/vendor/pdfjs`, copied there by the web build.
-- A PDF is stored as it is when it is at most 2 MB and has no scripts, forms or attachments in it, and is only
-  ever handed back as a download. Otherwise the picture of its first page is kept.
-- Pictures are kept in the database: JPEG, PNG or WebP, checked to the last byte, at most 1 MB each, two files per
+  No number of the document is kept: a reminder needs none.
+- "Scan a document": on a phone, "Use the camera" opens the phone's own camera (the site never asks for access
+  to it); "Choose a photo or PDF" takes a file. Of a PDF the first page is drawn in the browser and that picture
+  is what is read and kept; the PDF itself is never stored. The library that draws it (pdf.js) is served by this
+  site from `public/vendor/pdfjs`, copied there by the web build, and fetched only when a PDF is chosen.
+- Before the picture is sent, the page names the company it goes to (Groq or Anthropic, whichever is configured)
+  and the person must tick that they agree; the server refuses a reading without that consent. Everything on the
+  picture goes with it. Somebody who does not want that adds the document by hand, and with AI turned off in
+  Settings scanning is not offered at all.
+- What was read is only offered: the person sees it beside the picture with every doubt listed, and saves it
+  with two confirmations, one for the details and one that names the last day of validity. The server saves a
+  document "from a scan" only with the ticket of a reading that person had done within the hour, used once, and
+  only if the date being saved is the date that was confirmed. Whether the person kept or corrected the date the
+  machine read is recorded.
+- Pictures are kept in the database: JPEG, PNG or WebP, checked to the last byte, at most 1 MB each, two per
   document, 20 MB per person and 200 MB in all (`DOCUMENTS_MAX_MB_PER_USER`, `DOCUMENTS_MAX_MB_TOTAL`). Only the
   owner is ever served one.
+- Before real use the owner still has to decide: which provider reads the pictures and under which retention
+  terms, the wording of the consent, and the privacy policy that describes all this.
 
 ## Backups
 

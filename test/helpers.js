@@ -24,6 +24,11 @@ async function startApp() {
   // server loads .env, a value that is already there is not replaced.
   if (process.env.GROQ_API_KEY === undefined) process.env.GROQ_API_KEY = '';
   if (process.env.ANTHROPIC_API_KEY === undefined) process.env.ANTHROPIC_API_KEY = '';
+  // The same for mail: a developer's .env may name a real mail server and a real address of the site. The
+  // suite never sends mail and never builds links to a real site: its mail stays in memory unless a test
+  // itself chose a transport before starting the app.
+  if (process.env.MAIL_TRANSPORT === undefined) process.env.MAIL_TRANSPORT = 'outbox';
+  for (const name of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_PORT', 'APP_BASE_URL', 'MAIL_FROM', 'RESEND_API_KEY']) if (process.env[name] === undefined) process.env[name] = '';
   delete require.cache[require.resolve('../server')];
   const app = require('../server');
 

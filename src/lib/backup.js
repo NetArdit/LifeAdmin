@@ -7,12 +7,12 @@
 // keep it where the database's own secrets are kept, and nowhere public.
 //
 // Left out on purpose, because they are of no use in another place or time: who is signed in right now
-// (sessions), the devices bound to those sessions (push_subscriptions), one-time codes and reset links, and
-// the counters of the limits. After a restore everybody signs in again and turns notifications on again.
+// (sessions), the devices bound to those sessions (push_subscriptions), one-time codes and reset links, the
+// counters of the limits, and the hour-long tickets of document scans. After a restore everybody signs in again and turns notifications on again.
 
 const db = require('../db');
 
-const NOT_BACKED_UP = ['sessions', 'push_subscriptions', 'otp_codes', 'password_reset_tokens', 'rate_limits'];
+const NOT_BACKED_UP = ['sessions', 'push_subscriptions', 'otp_codes', 'password_reset_tokens', 'rate_limits', 'document_scans'];
 const FORMAT = 2;
 
 async function tableNames() {
@@ -108,4 +108,4 @@ async function restoreBackup(input) {
   return counts;
 }
 
-module.exports = { exportBackup, restoreBackup, checkBackup, NOT_BACKED_UP };
+module.exports = { exportBackup, restoreBackup, checkBackup, NOT_BACKED_UP, tableNames, inDependencyOrder };
