@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   push_status TEXT,
   push_attempts INTEGER NOT NULL DEFAULT 0,
   push_retry_at TEXT, -- while owed: nobody tries it again before this moment
+  push_claim TEXT, -- who is trying it now: only that attempt may write what became of it
   read_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

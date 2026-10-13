@@ -112,6 +112,7 @@ async function statusFor(userId, sessionId) {
 // ---- sending ----------------------------------------------------------------------------------------------
 
 // Replaceable, so that tests never call a push service.
+const SEND_TIMEOUT_MS = 8000;
 let sender = (subscription, payload, options) => require('web-push').sendNotification(subscription, payload, options);
 function setSender(fn) {
   const before = sender;
@@ -152,6 +153,9 @@ async function sendToRow(row, payload, { ttl = 3600, urgency = 'normal' } = {}) 
       vapidDetails: { subject: cfg.subject, publicKey: cfg.publicKey, privateKey: cfg.privateKey },
       TTL: ttl,
       urgency,
+      // A push service that does not answer is given up on: a person has at most MAX_DEVICES devices, so
+      // all of them together stay well inside the two minutes for which a push is held (notify.js).
+      timeout: SEND_TIMEOUT_MS,
     });
     await db.run("UPDATE push_subscriptions SET last_ok_at = datetime('now'), failures = 0 WHERE id = ?", [row.id]);
     return 'sent';
@@ -184,4 +188,4 @@ async function sendToUser(userId, message, { sessionId = null, ...options } = {}
   return counts;
 }
 
-module.exports = { config, parseSubscription, saveSubscription, removeForSession, statusFor, sendToUser, payloadOf, setSender, MAX_DEVICES };
+module.exports = { config, parseSubscription, saveSubscription, removeForSession, statusFor, sendToUser, payloadOf, setSender, MAX_DEVICES, SEND_TIMEOUT_MS };

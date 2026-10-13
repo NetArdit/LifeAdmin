@@ -70,16 +70,16 @@ router.post(
     }
     const idNorm = isEmail(identifier) ? identifier.trim().toLowerCase() : normalizePhone(identifier);
     const limitKey = `${req.ip}|${idNorm}`;
-    if (await limits.loginFail.isLimited(limitKey)) return await tooMany(res, limits.loginFail, limitKey);
+    // The try is counted before the password is looked at, in one statement: tries at the same instant
+    // cannot all pass a check in which none of them has been counted yet. A right password clears the count,
+    // so signing in is never held against the person; over the limit, not even a right one is looked at.
+    if (await limits.loginFail.consume(limitKey)) return await tooMany(res, limits.loginFail, limitKey);
 
     const user = await db.get('SELECT * FROM users WHERE email = ? OR phone = ?', [idNorm, idNorm]);
     // Always run one bcrypt comparison (against a dummy hash when the account
     // doesn't exist) so an unknown identifier isn't distinguishable by timing.
     const valid = await verifyPassword(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
-    if (!user || !valid) {
-      await limits.loginFail.consume(limitKey);
-      throw new ValidationError('Invalid credentials.');
-    }
+    if (!user || !valid) throw new ValidationError('Invalid credentials.');
     await limits.loginFail.reset(limitKey);
 
     const session = await createSession(user.id);
@@ -213,7 +213,7 @@ router.post(
     if (!isNonEmpty(code)) throw new ValidationError('Enter the code.');
 
     const otpKey = `otp|${req.user.id}`;
-    if (await limits.otpConfirm.isLimited(otpKey)) return await tooMany(res, limits.otpConfirm, otpKey);
+    if (await limits.otpConfirm.consume(otpKey)) return await tooMany(res, limits.otpConfirm, otpKey);
 
     const otp = await db.get(
       // expires_at is stored as an ISO-8601 string (toISOString), so compare
@@ -224,10 +224,8 @@ router.post(
        ORDER BY id DESC LIMIT 1`,
       [req.user.id, channel, code.trim(), new Date().toISOString()]
     );
-    if (!otp) {
-      await limits.otpConfirm.consume(otpKey);
-      throw new ValidationError('That code is invalid or has expired.');
-    }
+    if (!otp) throw new ValidationError('That code is invalid or has expired.');
+    await limits.otpConfirm.refund(otpKey);
 
     await db.run('UPDATE otp_codes SET consumed_at = datetime(\'now\') WHERE id = ?', [otp.id]);
     const column = channel === 'phone' ? 'phone_verified' : 'email_verified';

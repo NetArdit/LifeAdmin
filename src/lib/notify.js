@@ -1,8 +1,10 @@
+const crypto = require('crypto');
 const db = require('../db');
 const { safeJson } = require('./auth');
 const { afterCommit } = require('./afterCommit');
 const push = require('./push');
 const reminders = require('./reminders');
+const { canAccessTask } = require('./taskAccess');
 
 // One place decides how a person is told about something.
 //
@@ -20,6 +22,7 @@ const reminders = require('./reminders');
 // What decides whether somebody is told:
 //   - their own switches (users.notif_prefs): a kind that is switched off makes no bell row and no push;
 //   - whether they are still in the circle at the moment of sending: somebody who left is not told;
+//   - whether they can still open the task it is about, at the moment of sending ('no_access' if not);
 //   - "mute this circle" (family_members.muted_until): the bell row stays, the push is not sent;
 //   - quiet hours (users.reminder_prefs), only for a person who chose it (quietCircles: true; by default a
 //     circle is told at once, at night too): what happens in a circle at night then fills the bell and does
@@ -28,7 +31,14 @@ const reminders = require('./reminders');
 //
 // push_status on the bell row: NULL (this server sends no pushes), 'pending' (owed), 'sent', 'none' (no
 // device has notifications on), 'failed' (given up after MAX_PUSH_ATTEMPTS), 'muted', 'quiet', 'left',
-// 'expired' (still owed when it was no longer news).
+// 'no_access', 'expired' (still owed when it was no longer news). 'sent' means at least one of the person's
+// devices took it.
+//
+// An attempt holds the row under a name of its own (push_claim) and only the holder writes the outcome: an
+// attempt that outlived its two minutes and lost the row to the next one cannot overwrite what that one
+// found. Every call to a push service is cut off after a few seconds (push.js), so an attempt does not
+// outlive its hold in the first place. Every attempt counts, whether the push service refused or something
+// here broke: after MAX_PUSH_ATTEMPTS the row is closed either way.
 //
 // What this does not promise: exactly once. If a push service accepts a push and the database then cannot
 // be told, the next attempt sends it again; the tag (n-<id>) makes a device replace the first, not show two.
@@ -63,6 +73,13 @@ const PUSH_KIND = { chat: 'chat', comment: 'comment', family: 'task', reminder: 
 
 /** Why a push that is owed is not sent after all, or null when it is to be sent. */
 async function reasonNotToSend(row) {
+  // About a task: only to somebody who can open that task now. It may have been made private, given to
+  // somebody else or deleted since the bell row was written.
+  const about = /^#\/tasks\/(\d+)$/.exec(row.link || '');
+  if (about) {
+    const task = await db.get('SELECT * FROM tasks WHERE id = ?', [Number(about[1])]);
+    if (!await canAccessTask(row.user_id, task)) return 'no_access';
+  }
   if (!row.family_id) return null;
   const member = await db.get(
     "SELECT (muted_until IS NOT NULL AND muted_until > datetime('now')) AS muted FROM family_members WHERE user_id = ? AND family_id = ?",
@@ -81,13 +98,28 @@ async function reasonNotToSend(row) {
  * push_status values, 'retry' (failed, will be tried again) or null (not owed, or somebody else has it).
  */
 async function deliverPush(id) {
+  const claim = crypto.randomUUID();
   const row = await db.get(
-    `UPDATE notifications SET push_attempts = push_attempts + 1, push_retry_at = datetime('now', '+2 minutes')
+    `UPDATE notifications SET push_attempts = push_attempts + 1, push_retry_at = datetime('now', '+2 minutes'), push_claim = ?
      WHERE id = ? AND push_status = 'pending' AND (push_retry_at IS NULL OR push_retry_at <= datetime('now'))
      RETURNING id, user_id, type, link, family_id, push_kind, push_attempts`,
-    [id]
+    [claim, id]
   );
   if (!row) return null;
+  const close = (status) => db.run("UPDATE notifications SET push_status = ?, push_retry_at = NULL, push_claim = NULL WHERE id = ? AND push_status = 'pending' AND push_claim = ?", [status, row.id, claim]);
+  try {
+    return await attempt(row, close);
+  } catch (err) {
+    // Something here broke (the database, most likely), not the push service. It is an attempt like any
+    // other: counted, and after the last one the row is closed, so nothing is tried for ever.
+    console.error('[LifeAdmin] a push that was owed could not be tried:', (err && (err.code || err.name)) || 'error');
+    if (row.push_attempts < MAX_PUSH_ATTEMPTS) return 'retry';
+    await close('failed').catch(() => {});
+    return 'failed';
+  }
+}
+
+async function attempt(row, close) {
   let status = await reasonNotToSend(row);
   if (!status) {
     const counts = await push.sendToUser(
@@ -101,8 +133,8 @@ async function deliverPush(id) {
     // Otherwise it stays owed, and free to be taken again when the two minutes are over.
     else return 'retry';
   }
-  await db.run("UPDATE notifications SET push_status = ?, push_retry_at = NULL WHERE id = ? AND push_status = 'pending'", [status, row.id]);
-  return status;
+  // Null when another attempt holds the row by now: what became of it is that attempt's to say.
+  return (await close(status)).changes === 1 ? status : null;
 }
 
 /**
@@ -144,17 +176,17 @@ async function retryPushes({ limit = 25 } = {}) {
   const counts = { tried: 0, sent: 0, retry: 0, closed: 0, expired: 0 };
   if (!push.config().configured) return counts;
   counts.expired = (await db.run(
-    `UPDATE notifications SET push_status = 'expired', push_retry_at = NULL
-     WHERE push_status = 'pending' AND created_at < (CASE WHEN family_id IS NULL THEN datetime('now', '-${OTHER_NEWS_MINUTES} minutes') ELSE datetime('now', '-${CIRCLE_NEWS_MINUTES} minutes') END)`
+    `UPDATE notifications SET push_status = 'expired', push_retry_at = NULL, push_claim = NULL
+     WHERE push_status = 'pending' AND (push_retry_at IS NULL OR push_retry_at <= datetime('now')) AND created_at < (CASE WHEN family_id IS NULL THEN datetime('now', '-${OTHER_NEWS_MINUTES} minutes') ELSE datetime('now', '-${CIRCLE_NEWS_MINUTES} minutes') END)`
   )).changes;
   const owed = await db.all("SELECT id FROM notifications WHERE push_status = 'pending' AND (push_retry_at IS NULL OR push_retry_at <= datetime('now')) ORDER BY id LIMIT ?", [limit]);
   for (const { id } of owed) {
     let outcome;
     try {
       outcome = await deliverPush(id);
-    } catch (err) {
-      console.error('[LifeAdmin] a push that was owed could not be tried:', (err && (err.code || err.name)) || 'error');
-      outcome = 'retry';
+    } catch {
+      // Not even the taking of the row worked: the database is not answering. The next run goes on.
+      break;
     }
     if (!outcome) continue;
     counts.tried += 1;

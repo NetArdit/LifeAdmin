@@ -263,6 +263,81 @@ test('notifications on devices: circle events and reminders', async (t) => {
     assert.deepEqual(reached(), [besnik.endpoint, drita.endpoint].sort());
   });
 
+  await t.test('an attempt that breaks here, not at the push service, is counted too: three and the row is closed', async () => {
+    const me = await person('Genta');
+    const id = (await db.run("INSERT INTO notifications (user_id, type, title, push_status) VALUES (?, 'ai', 'Diçka', 'pending')", [me.id])).lastInsertRowid;
+    // The devices cannot be read: every attempt throws before any push service is called.
+    await db.exec('ALTER TABLE push_subscriptions RENAME TO push_subscriptions_away');
+    try {
+      assert.equal(await notify.deliverPush(id), 'retry');
+      await due(id);
+      assert.equal(await notify.deliverPush(id), 'retry');
+      await due(id);
+      assert.equal(await notify.deliverPush(id), 'failed');
+    } finally {
+      await db.exec('ALTER TABLE push_subscriptions_away RENAME TO push_subscriptions');
+    }
+    const row = await db.get('SELECT push_status, push_attempts, push_claim FROM notifications WHERE id = ?', [id]);
+    assert.deepEqual([row.push_status, row.push_attempts, row.push_claim], ['failed', notify.MAX_PUSH_ATTEMPTS, null]);
+    assert.equal(await notify.deliverPush(id), null);
+    assert.equal((await notify.retryPushes()).tried, 0);
+    assert.equal(sent.length, 0);
+  });
+
+  await t.test('an attempt that outlived its hold cannot write over what the next attempt found', async () => {
+    const me = await person('Hana');
+    const id = (await db.run("INSERT INTO notifications (user_id, type, title, push_status) VALUES (?, 'ai', 'Diçka', 'pending')", [me.id])).lastInsertRowid;
+    // The first call to the push service hangs until it is let go; later ones answer at once.
+    let letGo;
+    const hanging = new Promise((resolve) => { letGo = resolve; });
+    let calls = 0;
+    const undo = push.setSender(async (subscription) => {
+      calls += 1;
+      if (calls === 1) {
+        await hanging;
+        throw Object.assign(new Error('too late'), { statusCode: 500 });
+      }
+      sent.push({ endpoint: subscription.endpoint, payload: {} });
+    });
+    try {
+      const first = notify.deliverPush(id);
+      while (calls < 1) await new Promise((r) => setTimeout(r, 10));
+      // Its two minutes are over while it still waits.
+      await due(id);
+      assert.equal(await notify.deliverPush(id), 'sent');
+      letGo();
+      // The first attempt failed in the end; it no longer holds the row and says nothing about it.
+      assert.equal(await first, 'retry');
+      const row = await db.get('SELECT push_status, push_attempts FROM notifications WHERE id = ?', [id]);
+      assert.deepEqual([row.push_status, row.push_attempts], ['sent', 2]);
+      assert.equal((await notify.retryPushes()).tried, 0);
+    } finally {
+      letGo();
+      undo();
+    }
+  });
+
+  await t.test('a comment on a task that was made private before the push went out reaches only who can still open it', async () => {
+    const { arta, besnik, drita, family } = await circle();
+    const task = (await arta.c.post('/api/tasks', { title: 'Dhurata për Dritën', familyId: family.id, visibility: 'family' })).data.task;
+    fail = true;
+    assert.equal((await besnik.c.post(`/api/tasks/${task.id}/comments`, { body: 'Çfarë i marrim?' })).status, 201);
+    const forDrita = (await db.get("SELECT id FROM notifications WHERE user_id = ? AND type = 'comment' ORDER BY id DESC LIMIT 1", [drita.id])).id;
+    const forArta = (await db.get("SELECT id FROM notifications WHERE user_id = ? AND type = 'comment' ORDER BY id DESC LIMIT 1", [arta.id])).id;
+    assert.equal((await arta.c.patch(`/api/tasks/${task.id}`, { visibility: 'private' })).status, 200);
+    fail = false;
+    sent.length = 0;
+    await due(forDrita);
+    await due(forArta);
+    assert.equal(await notify.deliverPush(forDrita), 'no_access');
+    assert.equal(await notify.deliverPush(forArta), 'sent');
+    assert.deepEqual(reached(), [arta.endpoint]);
+
+    // A task that no longer exists: nobody is sent to it.
+    const gone = (await db.run("INSERT INTO notifications (user_id, type, title, link, push_status) VALUES (?, 'task', 'Reminder: task due', '#/tasks/99999999', 'pending')", [arta.id])).lastInsertRowid;
+    assert.equal(await notify.deliverPush(gone), 'no_access');
+  });
+
   await t.test('a reminder that is due reaches the device once, as a reminder, after its bell row is stored', async () => {
     const me = await person('Era');
     const task = (await me.c.post('/api/tasks', { title: 'Rinovo pasaportën', dueDate: ahead(10) })).data.task;

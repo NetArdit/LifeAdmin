@@ -50,12 +50,14 @@ async function inDependencyOrder(tables) {
 }
 
 async function exportBackup(now = new Date()) {
-  const tables = (await tableNames()).filter((t) => !NOT_BACKED_UP.includes(t));
-  const backup = { format: FORMAT, app: 'lifeadmin', takenAt: now.toISOString(), shape: await shapeOf(tables), tables: {} };
+  const backup = { format: FORMAT, app: 'lifeadmin', takenAt: now.toISOString(), shape: {}, tables: {} };
   // One transaction that sees one moment (REPEATABLE READ; the default would let each table's reading see
   // what was committed in between): the file is the database at that moment, not a mix of several.
   await db.tx(async () => {
     await db.run('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+    // Which tables and columns there are is read at that same moment.
+    const tables = (await tableNames()).filter((t) => !NOT_BACKED_UP.includes(t));
+    backup.shape = await shapeOf(tables);
     for (const table of tables) backup.tables[table] = await db.all(`SELECT * FROM ${table} ORDER BY 1`);
   });
   return backup;

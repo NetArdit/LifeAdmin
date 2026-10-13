@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
 const { isNonEmpty, isPhone, normalizePhone, ValidationError } = require('../lib/validate');
 const {
   requireMembership,
@@ -113,16 +113,18 @@ router.post(
     // without Express "trust proxy", req.ip is the proxy's address, so the IP budget
     // is shared by everyone; the per-user budget still applies to each account.
     const userKey = `join|${req.user.id}`;
-    if (await limits.joinFailUser.isLimited(userKey)) return await tooMany(res, limits.joinFailUser, userKey);
-    if (await limits.joinFailIp.isLimited(req.ip)) return await tooMany(res, limits.joinFailIp, req.ip);
+    // Every try is counted before the code is looked at, in one statement each: tries at the same instant
+    // cannot all pass a check in which none of them has been counted yet. A right code gives its count back.
+    const overUser = await limits.joinFailUser.consume(userKey);
+    const overIp = await limits.joinFailIp.consume(req.ip);
+    if (overUser) return await tooMany(res, limits.joinFailUser, userKey);
+    if (overIp) return await tooMany(res, limits.joinFailIp, req.ip);
 
     // One generic failure for unknown, mistyped and revoked (rotated) codes alike.
     const family = code.length <= 64 ? await db.get('SELECT * FROM families WHERE invite_code = ?', [code.trim().toUpperCase()]) : null;
-    if (!family) {
-      await limits.joinFailUser.consume(userKey);
-      await limits.joinFailIp.consume(req.ip);
-      throw new ValidationError('Invalid invite code.', { code: 'Invalid code' });
-    }
+    if (!family) throw new ValidationError('Invalid invite code.', { code: 'Invalid code' });
+    await limits.joinFailUser.refund(userKey);
+    await limits.joinFailIp.refund(req.ip);
 
     const already = await db.get('SELECT id FROM family_members WHERE family_id = ? AND user_id = ?', [family.id, req.user.id]);
     if (already) throw new ValidationError('You are already a member of this circle.');
@@ -161,7 +163,7 @@ router.get(
 // Add a member by phone number (spec §12: identify by phone, not name).
 router.post(
   '/:id/members',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const familyId = Number(req.params.id);
     await requireRole(req.user.id, familyId, ['owner', 'admin']);
 
@@ -261,7 +263,7 @@ router.delete(
 // automatic transfer anywhere (account deletion still refuses instead).
 router.post(
   '/:id/transfer-ownership',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const familyId = Number(req.params.id);
     const me = await requireRole(req.user.id, familyId, ['owner']);
     const memberId = Number(req.body && req.body.memberId);

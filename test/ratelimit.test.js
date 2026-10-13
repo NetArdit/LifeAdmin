@@ -3,7 +3,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { startApp } = require('./helpers');
+const { startApp, makeClient, signUp } = require('./helpers');
 
 test('limits counted in the database', async (t) => {
   const app = await startApp();
@@ -47,6 +47,46 @@ test('limits counted in the database', async (t) => {
     assert.equal(await l.isLimited('k'), false);
     assert.equal(await l.consume('k'), false, 'a new window, a first try');
     assert.equal((await db.get("SELECT hits FROM rate_limits WHERE bucket = 'tWindow'")).hits, 1);
+  });
+
+  await t.test('wrong passwords sent at the same instant are each counted: eight are looked at, the rest refused, and then not even the right one', async () => {
+    const { resetAllLimits } = require('../src/lib/authLimits');
+    await resetAllLimits();
+    const c = makeClient(app.base);
+    const { payload } = await signUp(c);
+    const guess = (password) => makeClient(app.base).post('/api/auth/login', { identifier: payload.email, password });
+    const answers = (await Promise.all(Array.from({ length: 14 }, (_, i) => guess(`gabim-${i}`)))).map((r) => r.status).sort();
+    assert.deepEqual(answers, [...Array(8).fill(400), ...Array(6).fill(429)]);
+    assert.equal((await guess(payload.password)).status, 429);
+  });
+
+  await t.test('a right password clears the count: signing in is never held against the person', async () => {
+    const { resetAllLimits } = require('../src/lib/authLimits');
+    await resetAllLimits();
+    const c = makeClient(app.base);
+    const { payload } = await signUp(c);
+    const guess = (password) => makeClient(app.base).post('/api/auth/login', { identifier: payload.email, password });
+    for (let i = 0; i < 5; i++) assert.equal((await guess('gabim')).status, 400);
+    for (let i = 0; i < 12; i++) assert.equal((await guess(payload.password)).status, 200);
+    // The whole allowance is there again.
+    for (let i = 0; i < 8; i++) assert.equal((await guess('gabim')).status, 400);
+    assert.equal((await guess('gabim')).status, 429);
+  });
+
+  await t.test('a wrong invite code is counted before it is looked at; a right one gives its count back', async () => {
+    const { resetAllLimits } = require('../src/lib/authLimits');
+    await resetAllLimits();
+    const owner = makeClient(app.base);
+    await signUp(owner);
+    const family = (await owner.post('/api/family', { name: 'Shtëpia' })).data.family;
+    const guest = makeClient(app.base);
+    await signUp(guest);
+    const answers = (await Promise.all(Array.from({ length: 13 }, () => guest.post('/api/family/join', { code: 'AAAAAAAAAAAA' })))).map((r) => r.status).sort();
+    assert.deepEqual(answers, [...Array(10).fill(400), ...Array(3).fill(429)]);
+    await resetAllLimits();
+    for (let i = 0; i < 9; i++) await guest.post('/api/family/join', { code: 'AAAAAAAAAAAA' });
+    assert.equal((await guest.post('/api/family/join', { code: family.inviteCode })).status, 201, 'the tenth try, and the right code');
+    assert.equal((await db.get("SELECT hits FROM rate_limits WHERE bucket = 'joinFailUser'")).hits, 9, 'the right code was not counted');
   });
 
   await t.test('the table holds a keyed hash, never the address or the email', async () => {

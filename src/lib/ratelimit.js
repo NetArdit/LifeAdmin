@@ -9,6 +9,10 @@
 // Whom a row is about is stored as a keyed hash (HMAC), never as an address or an email: the table says
 // "this unknown party tried 8 times", not who they are. Rows of ended windows are removed as counting goes.
 // The windows are fixed, as before: the count starts at the first try and is forgotten when the window ends.
+//
+// How a caller uses it where guessing must be stopped: consume() FIRST, and refuse when it answers true; then
+// look at what was tried; when it was right, reset() or refund(). Checking with isLimited() and counting only
+// after a failure leaves a gap in which any number of tries made at the same instant all pass the check.
 
 const crypto = require('crypto');
 const db = require('../db');
@@ -40,6 +44,10 @@ function createLimiter({ name, windowMs, max }) {
       // Now and then, what can no longer matter is swept away.
       if (Math.random() < 0.02) await db.run('DELETE FROM rate_limits WHERE expires_at <= ?', [now]);
       return row.hits > max;
+    },
+    /** Takes one try back: it turned out not to be a failure. */
+    async refund(key) {
+      await db.run('UPDATE rate_limits SET hits = hits - 1 WHERE bucket = ? AND key_hash = ? AND hits > 0', [name, hashOf(name, key)]);
     },
     async reset(key) {
       await db.run('DELETE FROM rate_limits WHERE bucket = ? AND key_hash = ?', [name, hashOf(name, key)]);
