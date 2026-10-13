@@ -247,6 +247,9 @@ test('reminders: the worker', async (t) => {
     const { handler } = require('../netlify/functions/reminders');
     const res = await handler();
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(Object.keys(JSON.parse(res.body)).sort(), ['cancelled', 'claimed', 'failed', 'lost', 'ms', 'released', 'retry', 'sent', 'sessionsEnded']);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(Object.keys(body).sort(), ['cancelled', 'claimed', 'failed', 'lost', 'ms', 'pushes', 'released', 'retry', 'sent', 'sessionsEnded']);
+    // The pushes that were still owed: counts too.
+    assert.deepEqual(Object.keys(body.pushes).sort(), ['closed', 'expired', 'retry', 'sent', 'tried']);
   });
 });
