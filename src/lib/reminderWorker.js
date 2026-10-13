@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const reminders = require('./reminders');
 const { notifyUser } = require('./notify');
+const { withAfterCommit } = require('./afterCommit');
 
 const BATCH = 50;
 const LEASE_SECONDS = 120;
@@ -81,7 +82,9 @@ async function bellFor(row) {
 
 async function deliverToBell(row) {
   const bell = await bellFor(row);
-  if (bell) await notifyUser(row.user_id, bell);
+  // The bell row is written here, in the row's own transaction; the push to the person's devices is sent by
+  // notifyUser after that transaction has committed (see handle).
+  if (bell) await notifyUser(row.user_id, { ...bell, pushKind: 'reminder' });
 }
 
 /**
@@ -90,7 +93,7 @@ async function deliverToBell(row) {
  */
 async function handle(row, token, { now = Date.now(), deliver = deliverToBell } = {}) {
   try {
-    return await db.tx(async () => {
+    return await withAfterCommit(() => db.tx(async () => {
       // The item first, then the row: the order every other writer takes them in.
       const wanted = await reminders.wantedFor(row.source_type, row.source_id, { lock: true });
       const mine = await db.get("SELECT id FROM planned_reminders WHERE id = ? AND status = 'claimed' AND claim_token = ? FOR UPDATE", [row.id, token]);
@@ -101,7 +104,7 @@ async function handle(row, token, { now = Date.now(), deliver = deliverToBell } 
       if (!await finish(row, token, 'sent')) return 'lost';
       await deliver(row);
       return 'sent';
-    });
+    }));
   } catch (err) {
     // Everything of this row was rolled back, the delivery included. Give it back for the next run, or up.
     const code = String((err && (err.code || err.name)) || 'error').slice(0, 40);

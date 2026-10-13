@@ -203,6 +203,23 @@ export function ReminderTimes({ ctx }) {
           <label className="field-label" htmlFor="reminder-time">For a date without a time, remind me at</label>
           <input id="reminder-time" className="input" type="time" value={data.defaults.dateOnlyTime} onChange={(e) => e.target.value && save({ defaults: { dateOnlyTime: e.target.value } })} />
         </div>
+        <div className="field">
+          <label className="checkbox-row">
+            <input type="checkbox" checked={data.defaults.quietOn} onChange={(e) => save({ defaults: { quietOn: e.target.checked } })} />
+            Quiet hours: hold reminders back at night
+          </label>
+          {data.defaults.quietOn ? (
+            <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap', marginTop: 'var(--sp-2)' }}>
+              <label className="text-sm muted" htmlFor="quiet-start">From</label>
+              <input id="quiet-start" className="input" style={{ width: 'auto' }} type="time" value={data.defaults.quietStart} onChange={(e) => e.target.value && save({ defaults: { quietStart: e.target.value } })} />
+              <label className="text-sm muted" htmlFor="quiet-end">until</label>
+              <input id="quiet-end" className="input" style={{ width: 'auto' }} type="time" value={data.defaults.quietEnd} onChange={(e) => e.target.value && save({ defaults: { quietEnd: e.target.value } })} />
+            </div>
+          ) : null}
+          <p className="text-sm muted" style={{ marginTop: 'var(--sp-1)' }}>
+            A reminder that falls in these hours arrives when they end; none is lost. Messages and activity in your circles are not held back.
+          </p>
+        </div>
         {DEFAULT_ROWS.map(([key, label]) => (
           <div className="field" key={key}>
             <label className="field-label" htmlFor={`reminder-${key}`}>{label}</label>

@@ -229,13 +229,13 @@ test('reminders: what is planned', async (t) => {
     assert.equal(before.effectiveTimezone, ZONE);
     assert.equal(before.defaults.bill, 4320);
 
-    const after = (await c.patch('/api/settings/reminders', { timezone: 'America/New_York', defaults: { dateOnlyTime: '07:30', bill: 1440 } })).data.reminders;
+    const after = (await c.patch('/api/settings/reminders', { timezone: 'America/New_York', defaults: { dateOnlyTime: '08:30', bill: 1440 } })).data.reminders;
     assert.equal(after.timezone, 'America/New_York');
-    assert.deepEqual({ time: after.defaults.dateOnlyTime, bill: after.defaults.bill, goal: after.defaults.goal }, { time: '07:30', bill: 1440, goal: 10080 });
+    assert.deepEqual({ time: after.defaults.dateOnlyTime, bill: after.defaults.bill, goal: after.defaults.goal }, { time: '08:30', bill: 1440, goal: 10080 });
 
     const [taskRow] = await rows('task', task.id);
     assert.equal(taskRow.timezone, 'America/New_York');
-    assert.equal(taskRow.scheduled_at, iso(r.wallToUtc(due, '07:30', 'America/New_York')));
+    assert.equal(taskRow.scheduled_at, iso(r.wallToUtc(due, '08:30', 'America/New_York')));
     assert.equal((await db.all("SELECT id FROM planned_reminders WHERE source_type = 'task' AND source_id = ?", [task.id])).length, 1, 'moved in place, not doubled');
     const [billRow] = await rows('bill', bill.id);
     assert.equal(billRow.rule_key, 'before:1440');
@@ -379,4 +379,30 @@ test('reminders: a test that named no database of its own gets none', () => {
   delete env.DATABASE_URL;
   const out = execFileSync(process.execPath, ['-e', "const db = require('./src/db'); db.get('SELECT 1 AS x').then(() => console.log('OPENED'), (e) => console.log('REFUSED ' + e.message))"], { cwd: path.join(__dirname, '..'), env, encoding: 'utf8' });
   assert.match(out, /^REFUSED Tests need their own database/);
+});
+
+test('reminders: quiet hours move a reminder to their end, never drop it', () => {
+  const r = require('../src/lib/reminders');
+  const zone = 'Europe/Belgrade';
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const prefs = { quietOn: true, quietStart: '22:00', quietEnd: '08:00' };
+  const at = (date, time) => r.wallToUtc(date, time, zone);
+  // Late evening waits for the next morning; early morning for the same morning; daytime is untouched.
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '23:30'), prefs, zone)), iso(at('2026-07-16', '08:00')));
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '06:00'), prefs, zone)), iso(at('2026-07-15', '08:00')));
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '22:00'), prefs, zone)), iso(at('2026-07-16', '08:00')));
+  for (const time of ['08:00', '09:00', '21:59']) assert.equal(iso(r.afterQuietHours(at('2026-07-15', time), prefs, zone)), iso(at('2026-07-15', time)), time);
+  // Quiet hours inside one day (a midday rest).
+  const rest = { quietOn: true, quietStart: '13:00', quietEnd: '15:00' };
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '14:10'), rest, zone)), iso(at('2026-07-15', '15:00')));
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '15:00'), rest, zone)), iso(at('2026-07-15', '15:00')));
+  // Switched off, or no hours at all: nothing moves.
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '23:30'), { ...prefs, quietOn: false }, zone)), iso(at('2026-07-15', '23:30')));
+  assert.equal(iso(r.afterQuietHours(at('2026-07-15', '23:30'), { quietOn: true, quietStart: '08:00', quietEnd: '08:00' }, zone)), iso(at('2026-07-15', '23:30')));
+  // The night the clocks go back: the end is still 08:00 on the clock.
+  assert.equal(iso(r.afterQuietHours(at('2026-10-24', '23:30'), prefs, zone)), iso(at('2026-10-25', '08:00')));
+  // The choices are checked like the others.
+  assert.deepEqual(r.parsePrefs({ quietOn: false, quietStart: '21:00', quietEnd: '07:00' }), { quietOn: false, quietStart: '21:00', quietEnd: '07:00' });
+  assert.throws(() => r.parsePrefs({ quietOn: 'yes' }), { name: 'ValidationError' });
+  assert.throws(() => r.parsePrefs({ quietStart: '25:00' }), { name: 'ValidationError' });
 });

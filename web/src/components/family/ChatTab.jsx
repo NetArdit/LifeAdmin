@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../Icon.jsx';
+import { MuteCircle } from './MuteCircle.jsx';
 import { initials, fmtRelative } from '../../../../public/js/format.js';
 
 // Direct port of renderChat()/chatBubble() from the original
@@ -67,6 +68,9 @@ export function ChatTab({ api, toast, myUserId, familyId }) {
 
   return (
     <div className="card card-pad">
+      <div style={{ marginBottom: 'var(--sp-3)' }}>
+        <MuteCircle api={api} toast={toast} familyId={familyId} />
+      </div>
       <div className="chat-window">
         <div className="chat-messages" ref={boxRef}>
           {messages === null ? (

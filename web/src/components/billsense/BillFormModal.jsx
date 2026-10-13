@@ -1,3 +1,4 @@
+import { reminderFromForm } from '../ReminderSelect.jsx';
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { openModal, closeModal } from '../../../../public/js/components/modal.js';
@@ -46,6 +47,7 @@ export function openBillFormModal({ api, toast, existing, onSaved }) {
           recurrence: fd.recurrence,
           dueDate: fd.dueDate,
           notes: fd.notes || null,
+          reminder: reminderFromForm(fd.reminder),
         };
         try {
           if (existing) await api.patch(`/api/bills/${existing.id}`, payload);

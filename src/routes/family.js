@@ -428,4 +428,39 @@ router.delete(
   })
 );
 
+// Quiet about one circle for a while, on this person's devices only: the bell keeps filling, nobody else is
+// affected, and reminders of the person's own tasks and bills still arrive. It ends by itself.
+router.get(
+  '/:id/mute',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    const me = await requireMembership(req.user.id, familyId);
+    const until = me.muted_until ? `${String(me.muted_until).replace(' ', 'T')}Z` : null;
+    res.json({ mutedUntil: until && Date.parse(until) > Date.now() ? until : null });
+  })
+);
+
+router.post(
+  '/:id/mute',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    await requireMembership(req.user.id, familyId);
+    const hours = Number(req.body && req.body.hours);
+    if (![1, 8, 24].includes(hours)) throw new ValidationError('Choose 1, 8 or 24 hours.', { hours: 'Invalid' });
+    const until = new Date(Date.now() + hours * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+    await db.run('UPDATE family_members SET muted_until = ? WHERE family_id = ? AND user_id = ?', [until, familyId, req.user.id]);
+    res.json({ ok: true, mutedUntil: `${until.replace(' ', 'T')}Z` });
+  })
+);
+
+router.delete(
+  '/:id/mute',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    await requireMembership(req.user.id, familyId);
+    await db.run('UPDATE family_members SET muted_until = NULL WHERE family_id = ? AND user_id = ?', [familyId, req.user.id]);
+    res.json({ ok: true, mutedUntil: null });
+  })
+);
+
 module.exports = router;

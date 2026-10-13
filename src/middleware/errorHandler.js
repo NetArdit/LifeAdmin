@@ -1,4 +1,5 @@
 const { ValidationError } = require('../lib/validate');
+const { withAfterCommit } = require('../lib/afterCommit');
 
 // Wraps an async route handler so rejected promises reach the error handler
 // instead of crashing the process or hanging the request.
@@ -30,7 +31,12 @@ function txRoute(fn) {
         return held;
       },
     };
-    await require('../db').tx(() => fn(req, held, next));
+    // What the handler asked to be done once its changes are stored (telling a phone, for one) is done
+    // after the commit, and before the answer: a serverless function may be frozen once it has answered.
+    await withAfterCommit(
+      () => require('../db').tx(() => fn(req, held, next)),
+      (err) => console.error('[LifeAdmin] after-commit work failed:', (err && (err.code || err.name)) || 'error')
+    );
     if (answered) res.status(status).json(body);
   });
 }

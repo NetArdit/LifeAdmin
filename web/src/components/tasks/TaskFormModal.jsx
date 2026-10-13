@@ -1,4 +1,5 @@
 import { createElement } from 'react';
+import { reminderFromForm } from '../ReminderSelect.jsx';
 import { createRoot } from 'react-dom/client';
 import { openModal, closeModal } from '../../../../public/js/components/modal.js';
 import { TaskFormFields, initialFamilySelection } from './TaskFormFields.jsx';
@@ -51,6 +52,7 @@ export function openTaskFormModal({ api, toast, state, existing, onSaved }) {
           durationMinutes: fd.durationMinutes ? Number(fd.durationMinutes) : null,
           recurrence: fd.recurrence || null,
           notes: fd.notes || null,
+          reminder: reminderFromForm(fd.reminder),
         };
         if (fd.dueDate && fd.startTimeOnly) {
           payload.startTime = new Date(`${fd.dueDate}T${fd.startTimeOnly}:00`).toISOString();

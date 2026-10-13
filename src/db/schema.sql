@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS family_members (
   display_name TEXT,
   role TEXT NOT NULL DEFAULT 'member', -- owner | admin | member
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+  muted_until TEXT, -- this member's devices stay quiet about this circle until then; the bell still fills
   UNIQUE(family_id, user_id)
 );
 
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   title TEXT NOT NULL,
   body TEXT,
   link TEXT, -- e.g. '#/tasks/12'
+  push_status TEXT, -- what became of the push to the person's devices: sent | none | failed | muted; NULL: not tried
   read_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

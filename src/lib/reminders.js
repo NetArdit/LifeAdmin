@@ -24,6 +24,11 @@ const DEFAULT_PREFS = Object.freeze({
   bill: 4320, // three days before
   milestone: 1440, // one day before
   goal: 10080, // a week before, for a goal that has no dated step
+  // Quiet hours: a reminder that would arrive in them waits for their end. Never dropped. They are about
+  // reminders only: what somebody in a circle writes now is told now.
+  quietOn: true,
+  quietStart: '22:00',
+  quietEnd: '08:00',
 });
 const KINDS = ['taskTimed', 'taskDate', 'bill', 'milestone', 'goal'];
 // The date at the start of a stored text, if it is a real day.
@@ -103,6 +108,9 @@ function prefsOf(user) {
   } catch {}
   const out = { ...DEFAULT_PREFS };
   if (TIME_RE.test(stored.dateOnlyTime)) out.dateOnlyTime = stored.dateOnlyTime;
+  if (typeof stored.quietOn === 'boolean') out.quietOn = stored.quietOn;
+  if (TIME_RE.test(stored.quietStart)) out.quietStart = stored.quietStart;
+  if (TIME_RE.test(stored.quietEnd)) out.quietEnd = stored.quietEnd;
   for (const k of KINDS) if (stored[k] === null || OFFSETS.includes(stored[k])) out[k] = stored[k];
   return out;
 }
@@ -116,8 +124,10 @@ function parsePrefs(input) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Invalid reminder settings.');
   const out = {};
   for (const [key, value] of Object.entries(input)) {
-    if (key === 'dateOnlyTime') {
-      if (typeof value !== 'string' || !TIME_RE.test(value)) throw new ValidationError('Invalid reminder time.', { dateOnlyTime: 'Use HH:MM' });
+    if (key === 'dateOnlyTime' || key === 'quietStart' || key === 'quietEnd') {
+      if (typeof value !== 'string' || !TIME_RE.test(value)) throw new ValidationError('Invalid time.', { [key]: 'Use HH:MM' });
+    } else if (key === 'quietOn') {
+      if (typeof value !== 'boolean') throw new ValidationError('Invalid reminder settings.', { quietOn: 'Invalid' });
     } else if (KINDS.includes(key)) {
       if (value !== null && !OFFSETS.includes(value)) throw new ValidationError('Invalid reminder choice.', { [key]: 'Invalid' });
     } else {
@@ -174,9 +184,25 @@ function taskDue(task, zone) {
 function plan(user, sourceType, sourceId, due, minutes) {
   if (minutes === null || minutes === undefined) return [];
   const zone = zoneOf(user);
-  const at = remindAt({ date: due.date, time: due.time || prefsOf(user).dateOnlyTime }, minutes, zone);
+  const prefs = prefsOf(user);
+  const at = afterQuietHours(remindAt({ date: due.date, time: due.time || prefs.dateOnlyTime }, minutes, zone), prefs, zone);
   if (!Number.isFinite(at)) return [];
   return [{ userId: user.id, sourceType, sourceId, occurrenceKey: due.key, ruleKey: `before:${minutes}`, scheduledAt: iso(at), timezone: zone }];
+}
+
+/**
+ * The moment itself, or, when it falls in the person's quiet hours, the end of them: 23:30 becomes 08:00 the
+ * next morning, 06:00 becomes 08:00 the same morning. Hours that start and end at the same time are none.
+ */
+function afterQuietHours(at, prefs, zone) {
+  if (!prefs.quietOn || prefs.quietStart === prefs.quietEnd || !Number.isFinite(at)) return at;
+  const wall = wallAt(at, zone);
+  const overnight = prefs.quietStart > prefs.quietEnd;
+  const inQuiet = overnight ? wall.time >= prefs.quietStart || wall.time < prefs.quietEnd : wall.time >= prefs.quietStart && wall.time < prefs.quietEnd;
+  if (!inQuiet) return at;
+  // The end is today when the clock is still before it, tomorrow when the quiet began this evening.
+  const day = overnight && wall.time >= prefs.quietStart ? addDays(wall.date, 1) : wall.date;
+  return wallToUtc(day, prefs.quietEnd, zone);
 }
 
 async function userRow(id) {
@@ -378,6 +404,7 @@ module.exports = {
   wallAt,
   wallToUtc,
   remindAt,
+  afterQuietHours,
   prefsOf,
   zoneOf,
   parsePrefs,

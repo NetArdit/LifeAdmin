@@ -1,3 +1,4 @@
+import { ReminderSelect } from '../ReminderSelect.jsx';
 const CATEGORIES = ['electricity', 'water', 'internet', 'phone', 'rent', 'subscription', 'insurance', 'loan', 'other'];
 const RECURRENCES = ['none', 'weekly', 'monthly', 'yearly'];
 
@@ -52,6 +53,7 @@ export function BillFormFields({ existing }) {
         <label className="field-label">Due date</label>
         <input className="input" type="date" name="dueDate" required defaultValue={existing?.dueDate || ''} />
       </div>
+      <ReminderSelect existing={existing?.reminder} hint="For a bill that repeats, the reminder moves to the next due date each time you pay it." />
       <div className="field">
         <label className="field-label">Notes</label>
         <textarea className="textarea" name="notes" defaultValue={existing ? existing.notes || '' : ''} />

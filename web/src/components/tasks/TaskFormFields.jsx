@@ -1,4 +1,5 @@
 import { PRIORITY_LABEL } from '../../../../public/js/format.js';
+import { ReminderSelect } from '../ReminderSelect.jsx';
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'];
 const RECURRENCES = ['daily', 'weekdays', 'weekly', 'monthly'];
@@ -96,6 +97,7 @@ export function TaskFormFields({ existing, families, canChangeVisibility = true 
           </select>
         </div>
       </div>
+      <ReminderSelect existing={existing?.reminder} hint="Needs a due date. With a start time it counts from that time; without one, from your usual hour." />
       {families.length && canChangeVisibility ? (
         <div className="field">
           <label className="field-label">Circle</label>

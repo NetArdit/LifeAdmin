@@ -145,6 +145,8 @@ async function open() {
       -- A number stored before the mode existed was a choice. It can only match once: afterwards every
       -- 'default' row has no number.
       UPDATE tasks SET reminder_mode = 'custom' WHERE reminder_mode = 'default' AND reminder_minutes_before IS NOT NULL;
+      ALTER TABLE family_members ADD COLUMN IF NOT EXISTS muted_until TEXT;
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_status TEXT;
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS claim_token TEXT;
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS last_error TEXT;
