@@ -106,6 +106,25 @@ npm run db:restore -- backups/<name>.json
   (`npm run push:keys` prints a set). Without them the bell works and the device switch says it is unavailable.
   On an iPhone push works only after the site is added to the home screen.
 
+## Documents and their dates
+
+- A document is a name, a kind (passport, insurance, vehicle inspection, warranty, ...), the last day it is valid
+  and the days before it on which to be reminded. Reminders are planned and delivered like all the others.
+- "Scan a document": a picture is sent to the AI service, which answers what kind of document it is and its
+  dates. That answer is only offered: the person sees it beside the picture, corrects it, and must confirm it
+  before anything is saved. The server refuses a scanned document without that confirmation, and so does the
+  database. The model is told not to return names or numbers; a number can be typed in by hand.
+- The picture goes to the configured AI provider (Groq or Anthropic) to be read. Somebody who does not want
+  that adds the document by hand; with AI turned off in Settings, scanning is not offered.
+- On a phone, "Use the camera" opens the phone's own camera (the site never asks for access to it); "Choose a
+  photo or PDF" takes a file. A PDF's first page is drawn in the browser and that picture is what is read; the
+  library that draws it (pdf.js) is served by this site from `public/vendor/pdfjs`, copied there by the web build.
+- A PDF is stored as it is when it is at most 2 MB and has no scripts, forms or attachments in it, and is only
+  ever handed back as a download. Otherwise the picture of its first page is kept.
+- Pictures are kept in the database: JPEG, PNG or WebP, checked to the last byte, at most 1 MB each, two files per
+  document, 20 MB per person and 200 MB in all (`DOCUMENTS_MAX_MB_PER_USER`, `DOCUMENTS_MAX_MB_TOTAL`). Only the
+  owner is ever served one.
+
 ## Backups
 
 `npm run db:backup -- backups/2026-10-13.json` writes everything people entered into one JSON file, read in a

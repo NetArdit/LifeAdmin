@@ -34,6 +34,8 @@ const DEFAULT_PREFS = Object.freeze({
   quietCircles: false,
 });
 const KINDS = ['taskTimed', 'taskDate', 'bill', 'milestone', 'goal'];
+// A document can be announced several times before its last day: these are the days a person may choose from.
+const DOCUMENT_REMINDER_DAYS = [0, 1, 3, 7, 14, 30, 60, 90];
 // The date at the start of a stored text, if it is a real day.
 const dayOf = (s) => (typeof s === 'string' && isDate(s.slice(0, 10)) ? s.slice(0, 10) : null);
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -242,6 +244,23 @@ async function wantedForBill(bill) {
   return plan(user, 'bill', bill.id, { key: date, date }, minutesFor(bill, 'bill', prefsOf(user)));
 }
 
+/** A document that is still kept and has a last day: one reminder for each of the days its owner chose. */
+async function wantedForDocument(doc) {
+  const date = doc && dayOf(doc.expires_on);
+  if (!date || doc.status !== 'active') return [];
+  const user = await userRow(doc.owner_id);
+  if (!user) return [];
+  let days = [];
+  try {
+    days = JSON.parse(doc.reminder_days);
+  } catch {}
+  const out = [];
+  for (const d of new Set(Array.isArray(days) ? days : [])) {
+    if (DOCUMENT_REMINDER_DAYS.includes(d)) out.push(...plan(user, 'document', doc.id, { key: date, date }, d * 1440));
+  }
+  return out;
+}
+
 async function wantedForGoal(goal, milestones) {
   if (!goal || goal.status !== 'active') return [];
   const user = await userRow(goal.owner_id);
@@ -271,6 +290,7 @@ async function wantedFor(sourceType, sourceId, { lock = false } = {}) {
   const hold = lock ? ' FOR UPDATE' : '';
   if (sourceType === 'task') return wantedForTask(await db.get(`SELECT * FROM tasks WHERE id = ?${hold}`, [sourceId]));
   if (sourceType === 'bill') return wantedForBill(await db.get(`SELECT * FROM bills WHERE id = ?${hold}`, [sourceId]));
+  if (sourceType === 'document') return wantedForDocument(await db.get(`SELECT * FROM documents WHERE id = ?${hold}`, [sourceId]));
   let goalId = sourceId;
   if (sourceType === 'milestone') {
     const step = await db.get('SELECT goal_id FROM goal_milestones WHERE id = ?', [sourceId]);
@@ -351,6 +371,14 @@ async function replanBill(billId, now) {
   });
 }
 
+async function replanDocument(documentId, now) {
+  await db.tx(async () => {
+    const doc = await db.get('SELECT * FROM documents WHERE id = ? FOR UPDATE', [documentId]);
+    if (!doc) return forget('document', documentId);
+    await reconcile([{ type: 'document', id: doc.id }], await wantedForDocument(doc), now);
+  });
+}
+
 /** A goal and its steps are planned together: whether the goal's own date is announced depends on them. */
 async function replanGoal(goalId, now) {
   await db.tx(async () => {
@@ -380,6 +408,7 @@ async function replanUser(userId, now) {
     for (const t of tasks) await replanTask(t.id, now);
     for (const b of await db.all("SELECT id FROM bills WHERE owner_id = ? AND status = 'unpaid' ORDER BY id", [userId])) await replanBill(b.id, now);
     for (const g of await db.all("SELECT id FROM goals WHERE owner_id = ? AND status = 'active' ORDER BY id", [userId])) await replanGoal(g.id, now);
+    for (const d of await db.all("SELECT id FROM documents WHERE owner_id = ? AND status = 'active' ORDER BY id", [userId])) await replanDocument(d.id, now);
   });
 }
 
@@ -395,7 +424,7 @@ async function forgetLostMilestones(userId) {
 
 // Rows of one person whose item no longer exists, whatever removed it (the demo data is deleted in bulk).
 async function forgetLost(userId) {
-  for (const [type, table] of [['task', 'tasks'], ['bill', 'bills'], ['goal', 'goals']]) {
+  for (const [type, table] of [['task', 'tasks'], ['bill', 'bills'], ['goal', 'goals'], ['document', 'documents']]) {
     await db.run(`DELETE FROM planned_reminders WHERE user_id = ? AND source_type = ? AND source_id NOT IN (SELECT id FROM ${table})`, [userId, type]);
   }
   await forgetLostMilestones(userId);
@@ -425,6 +454,8 @@ module.exports = {
   replanTask,
   replanBill,
   replanGoal,
+  replanDocument,
+  DOCUMENT_REMINDER_DAYS,
   replanUser,
   forget,
   forgetGoal,

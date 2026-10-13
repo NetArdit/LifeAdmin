@@ -55,6 +55,7 @@ const VIEW_SWITCH_ITEMS = [
 const RAIL_ITEMS = [
   { key: 'family', label: 'Circle', icon: 'family' },
   { key: 'billsense', label: 'Bills', icon: 'bill' },
+  { key: 'documents', label: 'Documents', icon: 'document' },
   { key: 'goals', label: 'Goals', icon: 'goal' },
   { key: 'decisionflow', label: 'Decisions', icon: 'decision' },
   { key: 'ecolife', label: 'EcoLife', icon: 'eco' },
@@ -69,6 +70,7 @@ const RAIL_ITEMS = [
 const RAIL_LINK_PREFIX = {
   family: '#/family',
   billsense: '#/billsense',
+  documents: '#/documents',
   goals: '#/goals',
   decisionflow: '#/decisionflow',
   ecolife: '#/ecolife',
@@ -458,6 +460,7 @@ const PAGES = {
   tasks: () => import('/app/main.js').then((m) => ({ mount: m.mountTasks, unmount: m.unmountTasks })),
   family: () => import('/app/main.js').then((m) => ({ mount: m.mountFamily, unmount: m.unmountFamily })),
   billsense: () => import('/app/main.js').then((m) => ({ mount: m.mountBillsense, unmount: m.unmountBillsense })),
+  documents: () => import('/app/main.js').then((m) => ({ mount: m.mountDocuments, unmount: m.unmountDocuments })),
   goals: () => import('/app/main.js').then((m) => ({ mount: m.mountGoals, unmount: m.unmountGoals })),
   ecolife: () => import('/app/main.js').then((m) => ({ mount: m.mountEcolife, unmount: m.unmountEcolife })),
   timeline: () => import('/app/main.js').then((m) => ({ mount: m.mountTimeline, unmount: m.unmountTimeline })),

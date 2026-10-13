@@ -11,6 +11,8 @@ const ai = require('./src/lib/ai');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// A picture of a document travels as base64 inside JSON: these routes alone take a larger body.
+app.use('/api/documents', express.json({ limit: '4mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(attachUser);
@@ -34,6 +36,7 @@ app.use('/api/bills', requireAuth, require('./src/routes/bills'));
 app.use('/api/decisions', requireAuth, require('./src/routes/decisions'));
 app.use('/api/ecolife', requireAuth, require('./src/routes/ecolife'));
 app.use('/api/goals', requireAuth, require('./src/routes/goals'));
+app.use('/api/documents', requireAuth, require('./src/routes/documents'));
 app.use('/api/timeline', requireAuth, require('./src/routes/timeline'));
 app.use('/api/search', requireAuth, require('./src/routes/search'));
 app.use('/api/ai', requireAuth, require('./src/routes/ai'));

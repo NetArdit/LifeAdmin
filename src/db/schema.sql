@@ -293,7 +293,7 @@ CREATE INDEX IF NOT EXISTS idx_shopping_family ON shopping_items(family_id);
 CREATE TABLE IF NOT EXISTS planned_reminders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  source_type TEXT NOT NULL, -- task | bill | goal | milestone
+  source_type TEXT NOT NULL, -- task | bill | goal | milestone | document
   source_id INTEGER NOT NULL,
   occurrence_key TEXT NOT NULL, -- the due date or moment this reminder is for
   rule_key TEXT NOT NULL, -- 'before:60'
@@ -341,3 +341,45 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   PRIMARY KEY (bucket, key_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_rate_limits_expiry ON rate_limits(expires_at);
+
+-- Documents and their dates (src/routes/documents.js): a passport, an insurance, a warranty.
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'other', -- passport | id_card | driving_licence | vehicle_registration | vehicle_inspection | insurance | warranty | contract | subscription | medical | other
+  issuer TEXT,
+  reference TEXT, -- a number the person chose to note (a policy, a plate): optional, typed by them, never read by the AI
+  issued_on TEXT,
+  expires_on TEXT, -- the last day it is valid; without one there is nothing to remind of
+  reminder_days TEXT NOT NULL DEFAULT '[30,7,0]', -- days before expires_on, as a JSON list
+  notes TEXT,
+  source TEXT NOT NULL DEFAULT 'manual', -- manual | scan (its fields were first read from a picture by the AI)
+  reviewed_at TEXT, -- when a person confirmed what was read from the picture; a scanned document always has it
+  status TEXT NOT NULL DEFAULT 'active', -- active | archived
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (source IN ('manual', 'scan')),
+  CHECK (status IN ('active', 'archived')),
+  CHECK (source <> 'scan' OR reviewed_at IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id, expires_on);
+
+-- A picture of a document, or the document itself as a PDF file. Kept in the database as base64 text so that
+-- it is covered by the same access rule, the same backup and the same deletion as the document itself. Room
+-- is the price: a picture of at most 1 MB, a PDF of at most 2 MB,
+-- two per document, 20 MB per person and 200 MB for everybody (the route holds these; a hosted database of
+-- half a gigabyte has no room for more).
+CREATE TABLE IF NOT EXISTS document_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  data_base64 TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+  CHECK (size_bytes BETWEEN 1 AND 2097152)
+);
+CREATE INDEX IF NOT EXISTS idx_document_files_document ON document_files(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_files_owner ON document_files(owner_id);

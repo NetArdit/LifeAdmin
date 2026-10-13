@@ -5,7 +5,7 @@
   "type": "module",
   "description": "React + Vite frontend foundation for LifeAdmin (Phase 1: Dashboard only). Builds a small ES module bundle that the existing vanilla-JS shell (public/js/app.js) loads for the #/dashboard route only — every other page is still served by the original shell. See PHASE_1_REACT_FOUNDATION_REPORT.md.",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node scripts/copy-pdfjs.mjs",
     "dev": "vite build --watch"
   },
   "dependencies": {
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "pdfjs-dist": "^6.4.299",
     "vite": "^5.4.11"
   }
 }

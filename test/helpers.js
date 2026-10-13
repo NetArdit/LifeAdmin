@@ -85,6 +85,8 @@ function makeClient(base) {
     // Deliberately mirrors the (now-fixed) frontend api.del(url, body) shape —
     // pass no body to simulate an unauthenticated-style bare DELETE.
     del: (p, b) => request('DELETE', p, b),
+    // The session cookie, for a request the test makes itself (a picture, read as bytes).
+    cookie: () => cookie,
     clearCookie: () => {
       cookie = '';
     },

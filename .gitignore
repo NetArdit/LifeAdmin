@@ -31,3 +31,6 @@ data/pg/
 
 # Copies of the database (npm run db:backup): people's data in the clear, never in the repository
 backups/
+
+# The PDF library, copied from its package by the web build (npm run build:web)
+public/vendor/

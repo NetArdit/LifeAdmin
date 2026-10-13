@@ -46,6 +46,9 @@ const browserGlobals = {
   requestAnimationFrame: 'readonly',
   Intl: 'readonly',
   atob: 'readonly',
+  createImageBitmap: 'readonly',
+  btoa: 'readonly',
+  Uint8Array: 'readonly',
 };
 
 module.exports = [
@@ -60,6 +63,9 @@ module.exports = [
       // a built, minified bundle, not source; linting it would just flag
       // meaningless issues in someone else's already-shipped code.
       'public/app/**',
+      // The PDF library, copied from its package by the web build.
+      'public/vendor/**',
+      'web/scripts/**',
       'public/dashboard/**', // stale pre-Phase-2 output path, removed from disk but harmless to keep ignoring
     ],
   },

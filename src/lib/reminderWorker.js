@@ -72,6 +72,12 @@ async function bellFor(row) {
     const b = await db.get('SELECT name, due_date FROM bills WHERE id = ?', [row.source_id]);
     return b && { type: 'bill', title: 'Reminder: bill due', body: `${b.name} · due ${b.due_date}`, link: '#/billsense' };
   }
+  if (row.source_type === 'document') {
+    const d = await db.get('SELECT title, expires_on FROM documents WHERE id = ?', [row.source_id]);
+    // The rule says how many days before the last day this reminder is: "before:0" is the day itself.
+    const today = row.rule_key === 'before:0';
+    return d && { type: 'document', title: today ? 'Reminder: a document expires today' : 'Reminder: a document expires soon', body: `${d.title} · valid until ${d.expires_on}`, link: '#/documents' };
+  }
   if (row.source_type === 'goal') {
     const g = await db.get('SELECT title, target_date FROM goals WHERE id = ?', [row.source_id]);
     return g && { type: 'goal', title: 'Reminder: goal date is near', body: `${g.title} · ${g.target_date}`, link: `#/goals/${row.source_id}` };

@@ -5,6 +5,7 @@ import { Tasks } from './pages/Tasks.jsx';
 import { Family } from './pages/Family.jsx';
 import { BillSense } from './pages/BillSense.jsx';
 import { Goals } from './pages/Goals.jsx';
+import { Documents } from './pages/Documents.jsx';
 import { EcoLife } from './pages/EcoLife.jsx';
 import { Timeline } from './pages/Timeline.jsx';
 import { DecisionFlow } from './pages/DecisionFlow.jsx';
@@ -68,6 +69,10 @@ export const unmountFamily = familyMount.unmount;
 const billsenseMount = makePageMount(BillSense);
 export const mountBillsense = billsenseMount.mount;
 export const unmountBillsense = billsenseMount.unmount;
+
+const documentsMount = makePageMount(Documents);
+export const mountDocuments = documentsMount.mount;
+export const unmountDocuments = documentsMount.unmount;
 
 const goalsMount = makePageMount(Goals);
 export const mountGoals = goalsMount.mount;
