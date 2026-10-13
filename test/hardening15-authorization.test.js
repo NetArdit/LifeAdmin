@@ -4,8 +4,6 @@
 // just an HTTP status.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
-const path = require('node:path');
 const { startApp, makeClient, signUp } = require('./helpers');
 
 test('hardening 1.5', async (t) => {
@@ -42,7 +40,7 @@ test('hardening 1.5', async (t) => {
   // ============ 1. FORMER MEMBER — every path, both ways of leaving ============
   for (const mode of ['voluntary leave', 'owner removal']) {
     await t.test(`former member (${mode}): every task read and mutation path is closed — verified by data, not status`, async () => {
-      resetAllLimits();
+      await resetAllLimits();
       const { A, B, C, D, fam, code } = await world();
       const due = new Date().toISOString().slice(0, 10);
       // tasks with recognisable strings
@@ -331,7 +329,7 @@ test('hardening 1.5', async (t) => {
 
   // ============ 5. Leave / remove / rejoin semantics (credential side) ============
   await t.test('leave keeps the code; removal rotates it; rejoin needs a currently valid code', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const { A, B, C, fam, code } = await world();
     await B.c.post(`/api/family/${fam.id}/leave`, {});
     assert.equal(await codeOf(A, fam.id), code);
@@ -365,7 +363,7 @@ test('hardening 1.5', async (t) => {
 
   // ============ 7. Legacy invite-code migration ============
   await t.test('legacy 8-character codes are replaced exactly once at start-up: old code dead, new works, data/ownership untouched, 12-character codes untouched', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const { A, B, fam } = await world();
     const legacyFam = fam;
     const t1 = (await A.c.post('/api/tasks', { title: 'MIGRATION-TASK', familyId: fam.id, visibility: 'family' })).data.task;

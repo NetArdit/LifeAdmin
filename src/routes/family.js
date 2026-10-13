@@ -113,14 +113,14 @@ router.post(
     // without Express "trust proxy", req.ip is the proxy's address, so the IP budget
     // is shared by everyone; the per-user budget still applies to each account.
     const userKey = `join|${req.user.id}`;
-    if (limits.joinFailUser.isLimited(userKey)) return tooMany(res, limits.joinFailUser, userKey);
-    if (limits.joinFailIp.isLimited(req.ip)) return tooMany(res, limits.joinFailIp, req.ip);
+    if (await limits.joinFailUser.isLimited(userKey)) return await tooMany(res, limits.joinFailUser, userKey);
+    if (await limits.joinFailIp.isLimited(req.ip)) return await tooMany(res, limits.joinFailIp, req.ip);
 
     // One generic failure for unknown, mistyped and revoked (rotated) codes alike.
     const family = code.length <= 64 ? await db.get('SELECT * FROM families WHERE invite_code = ?', [code.trim().toUpperCase()]) : null;
     if (!family) {
-      limits.joinFailUser.consume(userKey);
-      limits.joinFailIp.consume(req.ip);
+      await limits.joinFailUser.consume(userKey);
+      await limits.joinFailIp.consume(req.ip);
       throw new ValidationError('Invalid invite code.', { code: 'Invalid code' });
     }
 

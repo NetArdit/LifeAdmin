@@ -70,17 +70,17 @@ router.post(
     }
     const idNorm = isEmail(identifier) ? identifier.trim().toLowerCase() : normalizePhone(identifier);
     const limitKey = `${req.ip}|${idNorm}`;
-    if (limits.loginFail.isLimited(limitKey)) return tooMany(res, limits.loginFail, limitKey);
+    if (await limits.loginFail.isLimited(limitKey)) return await tooMany(res, limits.loginFail, limitKey);
 
     const user = await db.get('SELECT * FROM users WHERE email = ? OR phone = ?', [idNorm, idNorm]);
     // Always run one bcrypt comparison (against a dummy hash when the account
     // doesn't exist) so an unknown identifier isn't distinguishable by timing.
     const valid = await verifyPassword(password, user ? user.password_hash : DUMMY_PASSWORD_HASH);
     if (!user || !valid) {
-      limits.loginFail.consume(limitKey);
+      await limits.loginFail.consume(limitKey);
       throw new ValidationError('Invalid credentials.');
     }
-    limits.loginFail.reset(limitKey);
+    await limits.loginFail.reset(limitKey);
 
     const session = await createSession(user.id);
     setSessionCookie(res, session);
@@ -100,10 +100,10 @@ router.post(
     const norm = email.trim().toLowerCase();
 
     const emailKey = `${req.ip}|${norm}`;
-    const overEmail = limits.forgotEmail.consume(emailKey);
-    const overIp = limits.forgotIp.consume(req.ip);
-    if (overEmail) return tooMany(res, limits.forgotEmail, emailKey);
-    if (overIp) return tooMany(res, limits.forgotIp, req.ip);
+    const overEmail = await limits.forgotEmail.consume(emailKey);
+    const overIp = await limits.forgotIp.consume(req.ip);
+    if (overEmail) return await tooMany(res, limits.forgotEmail, emailKey);
+    if (overIp) return await tooMany(res, limits.forgotIp, req.ip);
 
     // Token creation, URL, template and delivery live in lib/passwordReset.js;
     // it never throws and reveals nothing about existence or delivery.
@@ -117,7 +117,7 @@ router.post(
 router.post(
   '/reset-password/check',
   asyncRoute(async (req, res) => {
-    if (limits.reset.consume(req.ip)) return tooMany(res, limits.reset, req.ip);
+    if (await limits.reset.consume(req.ip)) return await tooMany(res, limits.reset, req.ip);
     const row = await findValidResetToken(req.body && req.body.token);
     if (!row) throw new ValidationError(RESET_INVALID_MESSAGE);
     res.json({ ok: true });
@@ -127,7 +127,7 @@ router.post(
 router.post(
   '/reset-password',
   asyncRoute(async (req, res) => {
-    if (limits.reset.consume(req.ip)) return tooMany(res, limits.reset, req.ip);
+    if (await limits.reset.consume(req.ip)) return await tooMany(res, limits.reset, req.ip);
     const { token, password, confirmPassword } = req.body || {};
 
     const fields = {};
@@ -213,7 +213,7 @@ router.post(
     if (!isNonEmpty(code)) throw new ValidationError('Enter the code.');
 
     const otpKey = `otp|${req.user.id}`;
-    if (limits.otpConfirm.isLimited(otpKey)) return tooMany(res, limits.otpConfirm, otpKey);
+    if (await limits.otpConfirm.isLimited(otpKey)) return await tooMany(res, limits.otpConfirm, otpKey);
 
     const otp = await db.get(
       // expires_at is stored as an ISO-8601 string (toISOString), so compare
@@ -225,7 +225,7 @@ router.post(
       [req.user.id, channel, code.trim(), new Date().toISOString()]
     );
     if (!otp) {
-      limits.otpConfirm.consume(otpKey);
+      await limits.otpConfirm.consume(otpKey);
       throw new ValidationError('That code is invalid or has expired.');
     }
 

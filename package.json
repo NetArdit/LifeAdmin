@@ -14,6 +14,8 @@
     "build:web": "npm --prefix web install --include=dev && npm --prefix web run build",
     "postinstall": "npm run build:web",
     "push:keys": "node scripts/push-keys.cjs",
+    "db:backup": "node scripts/backup.cjs backup",
+    "db:restore": "node scripts/backup.cjs restore",
     "db:migrate": "node -e \"const db=require('./src/db');db.ready().then(()=>db.close()).then(()=>console.log('schema applied'))\""
   },
   "dependencies": {

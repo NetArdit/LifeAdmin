@@ -20,6 +20,9 @@ const nodeGlobals = {
   fetch: 'readonly',
   AbortController: 'readonly',
   Response: 'readonly',
+  Buffer: 'readonly',
+  URL: 'readonly',
+  URLSearchParams: 'readonly',
 };
 
 const browserGlobals = {
@@ -42,6 +45,7 @@ const browserGlobals = {
   clearInterval: 'readonly',
   requestAnimationFrame: 'readonly',
   Intl: 'readonly',
+  atob: 'readonly',
 };
 
 module.exports = [
@@ -61,7 +65,7 @@ module.exports = [
   },
   js.configs.recommended,
   {
-    files: ['server.js', 'src/**/*.js', 'test/**/*.js', 'eslint.config.js'],
+    files: ['server.js', 'src/**/*.js', 'test/**/*.js', 'scripts/**/*.cjs', 'netlify/**/*.js', 'eslint.config.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',
@@ -74,6 +78,15 @@ module.exports = [
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: { ...browserGlobals, prompt: 'readonly' },
+    },
+  },
+  {
+    // The service worker runs in a scope of its own: no window, no document.
+    files: ['public/sw.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'script',
+      globals: { self: 'readonly', fetch: 'readonly', URL: 'readonly', console: 'readonly' },
     },
   },
   {

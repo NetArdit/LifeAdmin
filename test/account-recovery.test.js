@@ -17,8 +17,8 @@ test('account recovery + auth hardening', async (t) => {
   const db = require('../src/db');
   const mailer = require('../src/lib/mailer');
   const { resetAllLimits } = require('../src/lib/authLimits');
-  t.beforeEach(() => {
-    resetAllLimits();
+  t.beforeEach(async () => {
+    await resetAllLimits();
     mailer.clearOutbox();
   });
 
@@ -181,7 +181,7 @@ test('account recovery + auth hardening', async (t) => {
       return times.sort((a, b) => a - b)[2];
     }
     const known = await median(payload.email);
-    resetAllLimits();
+    await resetAllLimits();
     const unknown = await median('missing.person@example.test');
     assert.ok(unknown >= known * 0.5, `unknown-user login (${unknown.toFixed(1)}ms) should not be much faster than wrong-password (${known.toFixed(1)}ms)`);
   });
@@ -209,13 +209,13 @@ test('account recovery + auth hardening', async (t) => {
       delete process.env.APP_BASE_URL;
       assert.equal((await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email })).status, 200);
       process.env.APP_BASE_URL = 'http://insecure.example.test';
-      resetAllLimits();
+      await resetAllLimits();
       assert.equal((await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email })).status, 200);
       assert.equal(mailer.getOutbox().length, 0, 'no email without a valid https APP_BASE_URL in production');
       assert.equal((await db.get('SELECT COUNT(*) c FROM password_reset_tokens')).c, before, 'no token is even created');
 
       process.env.APP_BASE_URL = 'https://app.example.test/';
-      resetAllLimits();
+      await resetAllLimits();
       await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email });
       const mail = mailer.getOutbox()[0];
       assert.ok(mail.text.includes('https://app.example.test/#/reset-password/'), 'link uses the configured origin, not the Host header');

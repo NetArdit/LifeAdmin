@@ -142,7 +142,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
   });
 
   await t.test('F-03 join: valid, lowercase-typed and invalid codes; one generic failure for unknown and stale codes', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const O = await newUser(), J = await newUser(), K = await newUser();
     const fam = await makeFamily(O);
     assert.equal((await J.c.post('/api/family/join', { code: fam.inviteCode.toLowerCase() })).status, 201);
@@ -158,7 +158,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
   });
 
   await t.test('F-03 throttling: failed joins are limited per user and per IP; success never resets; other users unaffected until the IP budget', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const O = await newUser(), U1 = await newUser(), U2 = await newUser();
     const fam = await makeFamily(O);
     for (let i = 0; i < 10; i++) assert.equal((await U1.c.post('/api/family/join', { code: 'BADCODE' + i })).status, 400);
@@ -167,7 +167,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await U1.c.get(`/api/family/${fam.id}`)).status, 403, 'and no membership was created');
     assert.equal((await U2.c.post('/api/family/join', { code: fam.inviteCode })).status, 201, 'another user is not affected by U1\'s budget');
     // a success does not refund attempts
-    resetAllLimits();
+    await resetAllLimits();
     const V = await newUser();
     const other = await makeFamily(await newUser());
     for (let i = 0; i < 9; i++) await V.c.post('/api/family/join', { code: 'WRONG' + i });
@@ -175,17 +175,17 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
     assert.equal((await V.c.post('/api/family/join', { code: 'WRONGX' })).status, 400, '10th failure still answered');
     assert.equal((await V.c.post('/api/family/join', { code: 'WRONGY' })).status, 429, 'the counter was not reset by the earlier success');
     // per-IP budget: many accounts, one address
-    resetAllLimits();
+    await resetAllLimits();
     const users = [await newUser(), await newUser(), await newUser(), await newUser()];
     for (const u of users.slice(0, 3)) for (let i = 0; i < 10; i++) await u.c.post('/api/family/join', { code: 'IPTEST' + i });
     const fourth = await users[3].c.post('/api/family/join', { code: 'IPTEST0' });
     assert.equal(fourth.status, 429, '30 failures from one IP exhaust the IP budget for every account behind it');
     assert.ok(fourth.data.error && !/family|code/i.test(fourth.data.error.replace(/try again/i, '')), 'throttle message reveals nothing about the family');
-    resetAllLimits();
+    await resetAllLimits();
   });
 
   await t.test('F-03 rotation: owner-only, old code dies immediately, new one works, nothing is rotated implicitly, code is never logged', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const O = await newUser(), M = await newUser(), X = await newUser(), N = await newUser();
     const fam = await makeFamily(O, M);
     const adminRow = memberRow(fam, M.id);
@@ -214,7 +214,7 @@ test('hardening 1: authorization, invites, privacy, ownership', async (t) => {
   });
 
   await t.test('F-03 lifecycle: removing a registered member replaces the code so they cannot rejoin; invited (unregistered) removal and voluntary leave do not', async () => {
-    resetAllLimits();
+    await resetAllLimits();
     const O = await newUser(), M = await newUser(), L = await newUser();
     const fam = await makeFamily(O, M, L);
     const old = fam.inviteCode;

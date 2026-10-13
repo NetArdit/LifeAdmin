@@ -15,15 +15,16 @@ npm start
 
 Then open **http://localhost:3001**.
 
-Optional: to enable the AI assistant, DecisionFlow analysis, natural-language
-weekly planning, and BillSense/EcoLife insights, copy `.env.example` to
-`.env` and set `ANTHROPIC_API_KEY`. Without it, the rest of the app works
-fully — AI-powered features show a clear "AI not configured" state instead
-of faking a response.
+The first start creates a local database in `data/pg/` (git-ignored). Nothing else has to be installed.
+
+Optional: the AI assistant, DecisionFlow analysis, natural-language weekly planning and the BillSense/EcoLife
+insights need a key. Copy `.env.example` to `.env` and set `GROQ_API_KEY` (free tier, used first when set) or
+`ANTHROPIC_API_KEY`. Without one, the rest of the app works fully and those features show a clear
+"AI not configured" state instead of faking a response.
 
 ```bash
 cp .env.example .env
-# edit .env and add ANTHROPIC_API_KEY=sk-ant-...
+# edit .env and add GROQ_API_KEY=... or ANTHROPIC_API_KEY=...
 npm start
 ```
 
@@ -39,40 +40,86 @@ load/clear demo data for your own account from **Settings → Demo mode**.
 
 ## Stack
 
-- **Frontend:** vanilla HTML/CSS/JS, no build step, no framework. A small
-  hash-router SPA shell (`public/js/app.js`) loads page modules on demand.
-- **Backend:** Node.js + Express.
-- **Database:** SQLite via Node's built-in `node:sqlite` module (no native
-  compilation, works out of the box on Windows).
-- **AI:** Anthropic Claude (`@anthropic-ai/sdk`), used only for the specific
-  features that genuinely need language understanding — everything else
-  (dates, scheduling, priority ranking, financial totals, decision scoring)
-  is deterministic JavaScript.
+- **Frontend:** React 18 built with Vite (`web/`) into one bundle, `public/app/main.js`, loaded by a small
+  vanilla shell (`public/js/app.js`: router, notifications, command palette). `npm install` builds it;
+  `npm run build:web` builds it again after a change in `web/`.
+- **Backend:** Node.js 22 + Express 5, CommonJS.
+- **Database:** PostgreSQL. With `DATABASE_URL` set the application talks to that server (the hosted site uses
+  Neon). Without it, development and the tests use PGlite, PostgreSQL compiled to run inside Node, stored in a
+  folder: same SQL, no server to install. `src/db/index.js` is the one place that knows the difference.
+- **AI:** Groq or Anthropic Claude (`src/lib/ai.js`), used only for the features that need language
+  understanding. Dates, scheduling, priority ranking, financial totals and decision scoring are deterministic
+  JavaScript.
+- **Hosting:** written for Netlify (`netlify.toml`): the pages are files, the API is one function
+  (`netlify/functions/api.js`), the reminders run from a scheduled function every 15 minutes.
 
 ## Project structure
 
 ```
-server.js                 App entry point
+server.js                 App entry point (local server; also what the Netlify function wraps)
 src/
-  db/                      SQLite connection, schema, demo data generator
-  lib/                     Auth, validation, dates, priority engine,
-                            scheduler engine, AI gateway, family helpers
-  middleware/               Auth guard, centralized error handling
+  db/                      Connection, schema.sql, demo data generator
+  lib/                     Auth, validation, dates, priority and scheduler engines, AI gateway, mail,
+                            reminders (planner and worker), notifications, Web Push, limits, backup
+  middleware/               Auth guard, same-origin rule, error handling and transactions
   routes/                  One file per feature area (tasks, family, bills, ...)
-public/
-  index.html
-  css/                     Design tokens, base, components, layout, pages
-  js/
-    app.js                 Shell, router, notifications, command palette
-    pages/                 One module per screen
-    components/            Icons, toast, modal, confirm dialog
-data/                       SQLite database file (gitignored)
+web/src/                   React pages and components
+public/                    What the browser gets: shell, built bundle, service worker, manifest, icons
+netlify/functions/         api.js (the whole API), reminders.js (the clock of the reminders)
+scripts/                   push-keys, backup, verify-worker-race
+test/                      node --test suites; each starts the app on a database of its own
+data/pg/                   The local database (git-ignored)
 ```
+
+## Commands
+
+```bash
+npm start                               # the server, http://localhost:3001
+npm run dev                             # the same, restarting on changes
+npm test                                # the whole suite, one file at a time
+npm run lint
+npm run build:web                       # rebuild the React bundle
+npm run seed                            # a demo account with sample data
+npm run db:migrate                      # apply schema.sql to the database in DATABASE_URL
+npm run push:keys                       # make the Web Push key pair and the storage key
+npm run db:backup -- backups/<name>.json
+npm run db:restore -- backups/<name>.json
+```
+
+## Reminders and notifications
+
+- Every task, bill, goal and milestone with a date gets its reminders planned as rows (`planned_reminders`) in
+  the same transaction that saves it. Each person chooses the usual lead times, the hour for things with a date
+  but no time, a time zone and quiet hours in Settings; a task or a bill can have its own lead time or none.
+- A worker (`src/lib/reminderWorker.js`) delivers what is due. It is run by the scheduled function; several
+  copies at once are safe (rows are claimed with a lease). A reminder that fell in quiet hours waits for their end.
+- Every notification is a row in the bell first. If the person turned notifications on for a device, it is also
+  pushed there (Web Push). The push carries no text of the task or message, only what kind of thing happened and
+  where to open it. Circle members get one notification per chat message, task comment and new circle task,
+  except the author; a circle can be muted for 1, 8 or 24 hours.
+- Web Push needs `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` and `PUSH_STORE_KEY`
+  (`npm run push:keys` prints a set). Without them the bell works and the device switch says it is unavailable.
+  On an iPhone push works only after the site is added to the home screen.
+
+## Backups
+
+`npm run db:backup -- backups/2026-10-13.json` writes everything people entered into one JSON file, read in a
+single transaction. It never writes over an existing file. `npm run db:restore -- <file>` puts a file into an
+**empty** database, whole or not at all, and refuses a database that has rows.
+
+- The file holds personal data in the clear, password hashes included. Keep it where the database secrets are
+  kept. `backups/` is git-ignored.
+- Left out on purpose: sessions, device subscriptions, one-time codes, reset links and the limit counters.
+  After a restore everybody signs in again and turns device notifications on again.
+- Both commands use the database the server would use: `DATABASE_URL` from `.env`, or the local one.
+- A restore expects the same version of the schema that made the backup.
 
 ## Notes
 
 - Passwords are hashed with bcrypt. Sessions are server-side, stored in
-  SQLite, referenced by an httpOnly cookie.
+  the database, referenced by an httpOnly cookie. Expired ones are removed by the reminders worker.
+- Requests that change something are accepted only from the site's own address (`APP_BASE_URL`,
+  `ALLOWED_ORIGINS`); the rule is one middleware for the whole API.
 - Phone/email verification uses a real OTP generated and stored server-side,
   but since sending an actual SMS/email requires a paid external provider,
   the code is returned directly in the API response with `demoMode: true`
@@ -82,24 +129,25 @@ data/                       SQLite database file (gitignored)
 
 ## Password-reset email and deployment notes
 
-- Password-reset email is sent through the provider-neutral `sendMail()` in
-  `src/lib/mailer.js`; the only provider adapter is [Resend](https://resend.com).
-  It works only with a Resend account, a sending domain verified there, and the
-  server-side variables `RESEND_API_KEY`, `MAIL_FROM` and an https `APP_BASE_URL`
-  (see `.env.example`). Without them, production sends nothing (the request
-  still returns the same generic response). Keys are never sent to the browser.
-- Rate limits (login, forgot/reset password, OTP) are kept in memory, per
-  process. That is adequate for **one instance reached directly**. Behind a
-  reverse proxy the app sees the proxy's address as the client IP unless
-  Express `trust proxy` is set for that exact topology, and with more than one
-  instance each keeps separate counters. Neither is configured here.
+- Password-reset email is sent through the provider-neutral `sendMail()` in `src/lib/mailer.js`. Two adapters:
+  [Resend](https://resend.com) (`RESEND_API_KEY`) and any SMTP server that takes a login (`SMTP_HOST`,
+  `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`). Both need `MAIL_FROM` on a domain the provider accepts and an https
+  `APP_BASE_URL` (see `.env.example`). Without them, production sends nothing (the request still returns the
+  same generic response). Keys are never sent to the browser.
+- Rate limits (sign-in, forgot/reset password, OTP, invite codes, push) are counted in the database
+  (`rate_limits`), so every running copy of the application shares one count and a restart forgets nothing.
+  Whom a count is about is stored as a keyed hash, not as an address or an email. The limits per address still
+  depend on the address the app sees: behind a reverse proxy that is the proxy's address unless Express
+  `trust proxy` is set for that exact topology, and it is not set here.
+- Deploying a version with schema changes: apply the schema to the hosted database first (`npm run db:migrate`
+  with its `DATABASE_URL`), set any new variables on the host, then deploy.
 - A family owner must transfer ownership (Family → Members → Make owner) before
   leaving the family or deleting their account. Deleting a family is not
   implemented.
 
 ### Family invite codes
 
-- Codes are 12 random characters (60 bits). Wrong guesses are limited per user (10 per 15 minutes) and per client IP (30 per 15 minutes); the limiter is in-memory and per process, and behind a reverse proxy without `trust proxy` the IP budget is shared by everyone behind that proxy.
+- Codes are 12 random characters (60 bits). Wrong guesses are limited per user (10 per 15 minutes) and per client IP (30 per 15 minutes); behind a reverse proxy without `trust proxy` the IP budget is shared by everyone behind that proxy.
 - The owner can create a new code at any time (Family → Overview → New invite code); the old code stops working immediately. Removing a registered member also replaces the code. Leaving a family on your own does not.
 - Codes are never written to logs or to the activity feed.
 

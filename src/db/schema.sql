@@ -324,3 +324,13 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_push_session ON push_subscriptions(session_id);
+
+-- How often something was tried (src/lib/ratelimit.js): one row per limit and party. The party is a keyed hash.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  bucket TEXT NOT NULL,
+  key_hash TEXT NOT NULL,
+  hits INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL, -- milliseconds: when the current window ends
+  PRIMARY KEY (bucket, key_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_expiry ON rate_limits(expires_at);

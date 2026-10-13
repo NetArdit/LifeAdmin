@@ -1,53 +1,53 @@
-// Minimal in-memory fixed-window rate limiter (Phase 8.2). No dependency, no
-// infrastructure. Honest limits of this design:
-//   - state lives in this process only: it resets on restart and is NOT shared
-//     across multiple server instances (LifeAdmin is a single-process,
-//     local-first app, so this fits today; a multi-instance deployment would
-//     need a shared store — that is a deployment decision, not made here);
-//   - keys are chosen by the caller (IP + identifier), so the limiter itself
-//     does not know or reveal whether an account exists.
+// Limits on how often something may be tried (a sign-in, a reset, an invite code), counted in the DATABASE.
+//
+// They used to be counted in the memory of the one server process. On a host that runs the application as
+// many short-lived copies (serverless functions) each copy counted for itself and forgot on every restart,
+// so "8 failed sign-ins in 15 minutes" was in truth 8 per copy: password guessing went on almost unchecked.
+// One row per limit and party now says how many tries are in the current window and when it ends, and every
+// copy reads and writes the same row.
+//
+// Whom a row is about is stored as a keyed hash (HMAC), never as an address or an email: the table says
+// "this unknown party tried 8 times", not who they are. Rows of ended windows are removed as counting goes.
+// The windows are fixed, as before: the count starts at the first try and is forgotten when the window ends.
 
-function createLimiter({ windowMs, max }) {
-  const hits = new Map(); // key -> { count, resetAt }
+const crypto = require('crypto');
+const db = require('../db');
 
-  function prune(now) {
-    if (hits.size < 1000) return;
-    for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k);
-  }
+const secret = () => process.env.RATE_LIMIT_SECRET || process.env.PUSH_STORE_KEY || 'lifeadmin-rate-limits';
+const hashOf = (name, key) => crypto.createHmac('sha256', secret()).update(`${name}|${key}`).digest('hex');
 
-  function current(key, now) {
-    const entry = hits.get(key);
-    if (!entry || entry.resetAt <= now) return null;
-    return entry;
-  }
-
+function createLimiter({ name, windowMs, max }) {
+  if (!name) throw new Error('A limiter needs a name: it is what keeps its counts apart from the others.');
   return {
-    // true when `key` has already used up its allowance in the current window.
-    isLimited(key) {
-      const entry = current(key, Date.now());
-      return !!entry && entry.count >= max;
+    /** True when `key` has already used up its allowance in the current window. */
+    async isLimited(key) {
+      const row = await db.get('SELECT hits FROM rate_limits WHERE bucket = ? AND key_hash = ? AND expires_at > ?', [name, hashOf(name, key), Date.now()]);
+      return !!row && row.hits >= max;
     },
-    // Records one hit. Returns true if this hit is over the allowance.
-    consume(key) {
+    /** Records one try. Returns true if this try is over the allowance. One statement: tries at the same moment are each counted. */
+    async consume(key) {
       const now = Date.now();
-      prune(now);
-      let entry = current(key, now);
-      if (!entry) {
-        entry = { count: 0, resetAt: now + windowMs };
-        hits.set(key, entry);
-      }
-      entry.count += 1;
-      return entry.count > max;
+      const row = await db.get(
+        `INSERT INTO rate_limits (bucket, key_hash, hits, expires_at) VALUES (?, ?, 1, ?)
+         ON CONFLICT (bucket, key_hash) DO UPDATE SET
+           hits = CASE WHEN rate_limits.expires_at <= ? THEN 1 ELSE rate_limits.hits + 1 END,
+           expires_at = CASE WHEN rate_limits.expires_at <= ? THEN excluded.expires_at ELSE rate_limits.expires_at END
+         RETURNING hits`,
+        [name, hashOf(name, key), now + windowMs, now, now]
+      );
+      // Now and then, what can no longer matter is swept away.
+      if (Math.random() < 0.02) await db.run('DELETE FROM rate_limits WHERE expires_at <= ?', [now]);
+      return row.hits > max;
     },
-    reset(key) {
-      hits.delete(key);
+    async reset(key) {
+      await db.run('DELETE FROM rate_limits WHERE bucket = ? AND key_hash = ?', [name, hashOf(name, key)]);
     },
-    resetAll() {
-      hits.clear();
+    async resetAll() {
+      await db.run('DELETE FROM rate_limits WHERE bucket = ?', [name]);
     },
-    retryAfterSeconds(key) {
-      const entry = current(key, Date.now());
-      return entry ? Math.max(1, Math.ceil((entry.resetAt - Date.now()) / 1000)) : 1;
+    async retryAfterSeconds(key) {
+      const row = await db.get('SELECT expires_at FROM rate_limits WHERE bucket = ? AND key_hash = ? AND expires_at > ?', [name, hashOf(name, key), Date.now()]);
+      return row ? Math.max(1, Math.ceil((Number(row.expires_at) - Date.now()) / 1000)) : 1;
     },
   };
 }
