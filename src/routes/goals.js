@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
-const { isNonEmpty, ValidationError } = require('../lib/validate');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
+const { isNonEmpty, ValidationError, checkDate } = require('../lib/validate');
 const { addDays, todayISO } = require('../lib/dates');
 const { logActivity } = require('../lib/family');
 const { computeProgress } = require('../lib/goalProgress');
@@ -74,10 +74,11 @@ router.get(
 
 router.post(
   '/',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const b = req.body || {};
     if (!isNonEmpty(b.title)) throw new ValidationError('Title is required.', { title: 'Required' });
     if (b.category && !CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
+    checkDate(b.targetDate, 'targetDate', 'Target date');
     const reminder = parseReminder(b.reminder) || { mode: 'default', minutes: null };
     const result = await db.run('INSERT INTO goals (owner_id, title, description, category, target_date, reminder_mode, reminder_minutes_before) VALUES (?,?,?,?,?,?,?)', [
       req.user.id,
@@ -104,13 +105,14 @@ router.get(
 
 router.patch(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     const b = req.body || {};
     if (b.title !== undefined && !isNonEmpty(b.title)) throw new ValidationError('Title is required.', { title: 'Required' });
     if (b.category !== undefined && !CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
     if (b.status !== undefined && !STATUSES.includes(b.status)) throw new ValidationError('Invalid status.');
+    checkDate(b.targetDate, 'targetDate', 'Target date');
     const map = { title: 'title', description: 'description', category: 'category', targetDate: 'target_date', status: 'status' };
     const fields = [];
     const params = [];
@@ -136,7 +138,7 @@ router.patch(
 
 router.delete(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     await db.run('DELETE FROM goals WHERE id = ?', [g.id]);
@@ -147,11 +149,12 @@ router.delete(
 
 router.post(
   '/:id/milestones',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     const { title, dueDate } = req.body || {};
     if (!isNonEmpty(title)) throw new ValidationError('Milestone title is required.');
+    checkDate(dueDate, 'dueDate', 'Due date');
     const count = (await db.get('SELECT COUNT(*) c FROM goal_milestones WHERE goal_id = ?', [g.id])).c;
     const result = await db.run('INSERT INTO goal_milestones (goal_id, title, due_date, sort_order) VALUES (?,?,?,?)', [
       g.id,
@@ -166,7 +169,7 @@ router.post(
 
 router.patch(
   '/:id/milestones/:milestoneId',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     const done = req.body && req.body.done ? 1 : 0;
@@ -186,7 +189,7 @@ router.patch(
 
 router.delete(
   '/:id/milestones/:milestoneId',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const g = await db.get('SELECT * FROM goals WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!g) return res.status(404).json({ error: 'Goal not found.' });
     await db.run('DELETE FROM goal_milestones WHERE id = ? AND goal_id = ?', [req.params.milestoneId, g.id]);
@@ -210,15 +213,17 @@ router.post(
     if (!result.ok) return res.json(result);
 
     const existingCount = (await db.get('SELECT COUNT(*) c FROM goal_milestones WHERE goal_id = ?', [g.id])).c;
-    for (const [i, m] of result.data.milestones.entries()) {
-      await db.run('INSERT INTO goal_milestones (goal_id, title, due_date, sort_order) VALUES (?,?,?,?)', [
-        g.id,
-        m.title,
-        addDays(todayISO(), m.dueOffsetDays),
-        existingCount + i,
-      ]);
-    }
-    await recomputeProgress(g.id);
+    await db.tx(async () => {
+      for (const [i, m] of result.data.milestones.entries()) {
+        await db.run('INSERT INTO goal_milestones (goal_id, title, due_date, sort_order) VALUES (?,?,?,?)', [
+          g.id,
+          m.title,
+          addDays(todayISO(), m.dueOffsetDays),
+          existingCount + i,
+        ]);
+      }
+      await recomputeProgress(g.id);
+    });
     res.json({ ok: true, goal: mapGoal(await db.get('SELECT * FROM goals WHERE id = ?', [g.id]), await milestonesFor(g.id)) });
   })
 );

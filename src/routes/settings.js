@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
 const { isNonEmpty, ValidationError } = require('../lib/validate');
 const { hashPassword, verifyPassword, publicUser, clearSessionCookie, deleteSessionsForUser } = require('../lib/auth');
 const { taskAccessSql } = require('../lib/taskAccess');
@@ -74,7 +74,7 @@ router.get(
 
 router.patch(
   '/reminders',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const { timezone, defaults } = req.body || {};
     const fields = [];
     const params = [];

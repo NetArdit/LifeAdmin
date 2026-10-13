@@ -8,6 +8,12 @@ function asyncRoute(fn) {
   };
 }
 
+// A route that changes an item AND what depends on it (its planned reminders): everything the handler does
+// in the database happens together or not at all. Not for a handler that waits on another service.
+function txRoute(fn) {
+  return asyncRoute((req, res, next) => require('../db').tx(() => fn(req, res, next)));
+}
+
 // Centralized error handler. Never leaks stack traces or internals to the client.
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
   if (err instanceof ValidationError) {
@@ -20,4 +26,4 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
   res.status(500).json({ error: 'Something went wrong on our end. Please try again.' });
 }
 
-module.exports = { asyncRoute, errorHandler };
+module.exports = { asyncRoute, txRoute, errorHandler };

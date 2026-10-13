@@ -192,12 +192,15 @@ async function seedDemoForUser(userId) {
     ]);
   }
 
+  // Seeded from the route or from the command line, the demo items get their reminders planned.
+  await require('../lib/reminders').replanUser(userId);
   return { familyId: family.id };
 }
 
 async function clearDemoForUser(userId) {
   await db.run(`DELETE FROM tasks WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
   await db.run(`DELETE FROM bills WHERE owner_id = ? AND notes = ?`, [userId, DEMO_TAG]);
+  await require('../lib/reminders').replanUser(userId);
 }
 
 // Standalone CLI usage: `npm run seed` creates a fresh demo account.

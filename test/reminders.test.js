@@ -250,6 +250,71 @@ test('reminders: what is planned', async (t) => {
     assert.equal((await makeClient(app.base).get('/api/settings/reminders')).status, 401);
   });
 
+  await t.test('many edits of one task at once leave one pending reminder, for the date the task ends with', async () => {
+    const { c } = await person();
+    const task = (await c.post('/api/tasks', { title: 'Moving target', dueDate: ahead(10) })).data.task;
+    const answers = await Promise.all([11, 12, 13, 14, 15, 16, 17, 18].map((d) => c.patch(`/api/tasks/${task.id}`, { dueDate: ahead(d) })));
+    assert.ok(answers.every((a) => a.status === 200));
+    const final = (await db.get('SELECT due_date FROM tasks WHERE id = ?', [task.id])).due_date;
+    assert.deepEqual((await rows('task', task.id)).map((p) => p.occurrence_key), [final]);
+  });
+
+  await t.test('a change and its plan stand or fall together', async () => {
+    const { c } = await person();
+    const task = (await c.post('/api/tasks', { title: 'All or nothing', dueDate: ahead(10) })).data.task;
+    // The planner fails in the middle of the request: the task must not have moved either.
+    await db.exec('ALTER TABLE planned_reminders RENAME TO planned_reminders_away');
+    const failed = await c.patch(`/api/tasks/${task.id}`, { dueDate: ahead(12) });
+    await db.exec('ALTER TABLE planned_reminders_away RENAME TO planned_reminders');
+    assert.equal(failed.status, 500);
+    assert.equal((await db.get('SELECT due_date FROM tasks WHERE id = ?', [task.id])).due_date, ahead(10));
+    assert.deepEqual((await rows('task', task.id)).map((p) => p.occurrence_key), [ahead(10)]);
+  });
+
+  await t.test('a day that is not in the calendar is refused everywhere, and never planned if it is already stored', async () => {
+    const { c, id } = await person();
+    for (const bad of ['2026-02-31', '2027-02-29', '2026-13-01', 'tomorrow', '2026-10-13T09:00']) {
+      assert.equal((await c.post('/api/tasks', { title: 'x', dueDate: bad })).status, 400, bad);
+    }
+    assert.equal((await c.post('/api/bills', { name: 'x', amount: 5, dueDate: '2026-02-31' })).status, 400);
+    assert.equal((await c.post('/api/goals', { title: 'x', targetDate: '2026-02-31' })).status, 400);
+    const goal = (await c.post('/api/goals', { title: 'Real', targetDate: '2028-02-29' })).data.goal;
+    assert.equal((await c.post(`/api/goals/${goal.id}/milestones`, { title: 'x', dueDate: '2026-04-31' })).status, 400);
+    assert.equal((await c.patch(`/api/goals/${goal.id}`, { targetDate: '2026-02-30' })).status, 400);
+    const task = (await c.post('/api/tasks', { title: 'Fine', dueDate: ahead(10) })).data.task;
+    assert.equal((await c.patch(`/api/tasks/${task.id}`, { dueDate: '2026-02-31' })).status, 400);
+    assert.equal((await c.patch(`/api/tasks/${task.id}`, { dueDate: null })).status, 200, 'a date can still be taken away');
+    assert.equal((await rows('task', task.id)).length, 0);
+    // Written before the check existed.
+    const old = await db.run("INSERT INTO tasks (owner_id, title, due_date) VALUES (?, 'Old row', '2099-02-31')", [id]);
+    await r.replanTask(old.lastInsertRowid);
+    assert.equal((await rows('task', old.lastInsertRowid)).length, 0);
+  });
+
+  await t.test('the demo data gets its reminders, and loses them when it is cleared', async () => {
+    const { c, id } = await person();
+    const { seedDemoForUser, clearDemoForUser } = require('../src/db/seed-demo');
+    await seedDemoForUser(id);
+    const planned = (await db.get("SELECT COUNT(*) c FROM planned_reminders WHERE user_id = ? AND status = 'pending'", [id])).c;
+    assert.ok(planned > 0, 'something of the demo data is ahead and planned');
+    await clearDemoForUser(id);
+    const lost = await db.get("SELECT COUNT(*) c FROM planned_reminders WHERE user_id = ? AND source_type = 'task' AND source_id NOT IN (SELECT id FROM tasks)", [id]);
+    assert.equal(lost.c, 0);
+    assert.equal((await c.get('/api/tasks')).status, 200);
+  });
+
+  await t.test("rebuilding a person's plan from nothing gives the same plan", async () => {
+    const { c, id } = await person();
+    await c.post('/api/tasks', { title: 'One', dueDate: ahead(9) });
+    await c.post('/api/bills', { name: 'Two', amount: 5, dueDate: ahead(30) });
+    const picture = () => db.all("SELECT source_type, source_id, occurrence_key, rule_key, scheduled_at FROM planned_reminders WHERE user_id = ? AND status = 'pending' ORDER BY source_type, source_id", [id]);
+    const before = await picture();
+    assert.equal(before.length, 2);
+    await db.run('DELETE FROM planned_reminders WHERE user_id = ?', [id]);
+    await r.replanUser(id);
+    assert.deepEqual(await picture(), before);
+  });
+
   await t.test('a circle task: the owner and the assignee are reminded, each in their own zone; nobody else; not after leaving', async () => {
     const owner = await person();
     const helper = await person();
@@ -270,4 +335,14 @@ test('reminders: what is planned', async (t) => {
     assert.equal((await helper.c.post(`/api/family/${family.id}/leave`)).status, 200);
     assert.deepEqual((await rows('task', task.id)).map((p) => p.user_id), [owner.id], 'somebody who left the circle is no longer reminded of its task');
   });
+});
+
+test('reminders: a test that named no database of its own gets none', () => {
+  const { execFileSync } = require('node:child_process');
+  const path = require('node:path');
+  const env = { ...process.env, NODE_ENV: 'test' };
+  delete env.LIFEADMIN_DB_PATH;
+  delete env.DATABASE_URL;
+  const out = execFileSync(process.execPath, ['-e', "const db = require('./src/db'); db.get('SELECT 1 AS x').then(() => console.log('OPENED'), (e) => console.log('REFUSED ' + e.message))"], { cwd: path.join(__dirname, '..'), env, encoding: 'utf8' });
+  assert.match(out, /^REFUSED Tests need their own database/);
 });

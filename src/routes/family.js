@@ -240,8 +240,8 @@ router.delete(
       await db.run('DELETE FROM family_members WHERE id = ?', [member.id]);
       // The removed person's bills must not keep feeding this family's feed.
       if (member.user_id) await db.run('UPDATE bills SET family_id = NULL WHERE owner_id = ? AND family_id = ?', [member.user_id, familyId]);
+      if (member.user_id) await replanUser(member.user_id);
     });
-    if (member.user_id) await replanUser(member.user_id);
     // Hardening 1 / F-03: a removed registered member still knows the old code, so
     // it is replaced; otherwise "remove" could be undone with one join request.
     // (Phone-invited people who never registered never held the code.)
@@ -324,8 +324,8 @@ router.post(
     await db.tx(async () => {
       await db.run('DELETE FROM family_members WHERE id = ?', [me.id]);
       await db.run('UPDATE bills SET family_id = NULL WHERE owner_id = ? AND family_id = ?', [req.user.id, familyId]);
+      await replanUser(req.user.id);
     });
-    await replanUser(req.user.id);
     await logActivity({
       userId: req.user.id,
       familyId,

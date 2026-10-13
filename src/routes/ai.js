@@ -117,8 +117,8 @@ router.post(
         createdIds.push(inserted.lastInsertRowid);
         created++;
       }
+      for (const id of createdIds) await replanTask(id);
     });
-    for (const id of createdIds) await replanTask(id);
     res.status(201).json({ ok: true, created });
   })
 );

@@ -18,7 +18,16 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 // Overridable so that the test suite can point at a disposable database. With PostgreSQL in the process it
 // names a folder, not a file.
-const DB_PATH = process.env.LIFEADMIN_DB_PATH || path.join(DATA_DIR, 'pg');
+const DEFAULT_DB_PATH = path.join(DATA_DIR, 'pg');
+const DB_PATH = process.env.LIFEADMIN_DB_PATH || DEFAULT_DB_PATH;
+// Read when the database is opened, not when this file is loaded: a test that loads this module before it
+// has named its disposable database must still get that one. And a test that named none gets nothing,
+// instead of quietly writing into the developer's own database.
+function embeddedPath() {
+  const chosen = process.env.LIFEADMIN_DB_PATH;
+  if (!chosen && process.env.NODE_ENV === 'test') throw new Error('Tests need their own database: set LIFEADMIN_DB_PATH (test/helpers.js startApp does) before the database is first used.');
+  return chosen || DEFAULT_DB_PATH;
+}
 const NOW = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')";
 
 /** The application's SQL, said the way PostgreSQL says it. */
@@ -118,7 +127,7 @@ async function openEmbedded(dir) {
 // ---- opening, once ------------------------------------------------------------------------------------------
 async function open() {
   const url = process.env.DATABASE_URL;
-  const backend = url ? await openServer(url) : await openEmbedded(DB_PATH);
+  const backend = url ? await openServer(url) : await openEmbedded(embeddedPath());
   // A host that starts the application often must not be what changes the schema: there, the schema is
   // applied by a step of its own (npm run db:migrate) and DB_SKIP_SCHEMA=1 is set.
   if (process.env.DB_SKIP_SCHEMA !== '1') {

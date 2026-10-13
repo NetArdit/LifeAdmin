@@ -10,7 +10,7 @@
 // "09:00" is decided by their own time zone, at planning time.
 
 const db = require('../db');
-const { ValidationError } = require('./validate');
+const { ValidationError, isDate } = require('./validate');
 const { addDays } = require('./dates');
 const { canAccessTask } = require('./taskAccess');
 
@@ -26,7 +26,8 @@ const DEFAULT_PREFS = Object.freeze({
   goal: 10080, // a week before, for a goal that has no dated step
 });
 const KINDS = ['taskTimed', 'taskDate', 'bill', 'milestone', 'goal'];
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// The date at the start of a stored text, if it is a real day.
+const dayOf = (s) => (typeof s === 'string' && isDate(s.slice(0, 10)) ? s.slice(0, 10) : null);
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Kosovo and Albania keep the same clock; IANA has no zone of Prishtina's own.
@@ -156,14 +157,14 @@ function minutesFor(row, kind, prefs) {
 // A task's start is written by the browser as an instant ("...Z"). Text without a zone is read as the
 // person's own clock, never as the server's.
 function taskDue(task, zone) {
-  if (typeof task.due_date !== 'string' || !DATE_RE.test(task.due_date.slice(0, 10))) return null;
-  const date = task.due_date.slice(0, 10);
+  const date = dayOf(task.due_date);
+  if (!date) return null;
   const s = task.start_time;
   if (typeof s === 'string' && s) {
     if (/(Z|[+-]\d\d:?\d\d)$/i.test(s)) {
       const ms = Date.parse(s);
       if (Number.isFinite(ms)) return { timed: true, key: iso(ms), ...wallAt(ms, zone) };
-    } else if (DATE_RE.test(s.slice(0, 10)) && TIME_RE.test(s.slice(11, 16))) {
+    } else if (dayOf(s) && TIME_RE.test(s.slice(11, 16))) {
       return { timed: true, key: `${s.slice(0, 10)}T${s.slice(11, 16)}`, date: s.slice(0, 10), time: s.slice(11, 16) };
     }
   }
@@ -198,10 +199,10 @@ async function wantedForTask(task) {
 }
 
 async function wantedForBill(bill) {
-  if (!bill || bill.status !== 'unpaid' || typeof bill.due_date !== 'string' || !DATE_RE.test(bill.due_date.slice(0, 10))) return [];
+  const date = bill && dayOf(bill.due_date);
+  if (!date || bill.status !== 'unpaid') return [];
   const user = await userRow(bill.owner_id);
   if (!user) return [];
-  const date = bill.due_date.slice(0, 10);
   return plan(user, 'bill', bill.id, { key: date, date }, minutesFor(bill, 'bill', prefsOf(user)));
 }
 
@@ -211,15 +212,15 @@ async function wantedForGoal(goal, milestones) {
   if (!user) return [];
   const prefs = prefsOf(user);
   const out = [];
-  const dated = milestones.filter((m) => typeof m.due_date === 'string' && DATE_RE.test(m.due_date.slice(0, 10)));
+  const dated = milestones.filter((m) => dayOf(m.due_date));
   for (const m of dated) {
     if (m.done) continue;
-    const date = m.due_date.slice(0, 10);
+    const date = dayOf(m.due_date);
     out.push(...plan(user, 'milestone', m.id, { key: date, date }, prefs.milestone));
   }
   // A goal whose steps have dates is followed step by step; its own date is announced only when it has none.
-  if (!dated.length && typeof goal.target_date === 'string' && DATE_RE.test(goal.target_date.slice(0, 10))) {
-    const date = goal.target_date.slice(0, 10);
+  const date = dayOf(goal.target_date);
+  if (!dated.length && date) {
     out.push(...plan(user, 'goal', goal.id, { key: date, date }, minutesFor(goal, 'goal', prefs)));
   }
   return out;
@@ -272,34 +273,56 @@ async function reconcile(scope, wanted, now = Date.now()) {
   });
 }
 
+// Each replan reads its item while holding a lock on the item's row, in the transaction that then writes
+// the plan. Two replans of one item therefore run one after the other and the later one sees the item as
+// the earlier left it: an older picture of the item can never be written over a newer plan. Called from a
+// route that changed the item in the same transaction, the plan and the change stand or fall together.
 async function replanTask(taskId, now) {
-  const task = await db.get('SELECT * FROM tasks WHERE id = ?', [taskId]);
-  if (!task) return forget('task', taskId);
-  await reconcile([{ type: 'task', id: task.id }], await wantedForTask(task), now);
+  await db.tx(async () => {
+    const task = await db.get('SELECT * FROM tasks WHERE id = ? FOR UPDATE', [taskId]);
+    if (!task) return forget('task', taskId);
+    await reconcile([{ type: 'task', id: task.id }], await wantedForTask(task), now);
+  });
 }
 
 async function replanBill(billId, now) {
-  const bill = await db.get('SELECT * FROM bills WHERE id = ?', [billId]);
-  if (!bill) return forget('bill', billId);
-  await reconcile([{ type: 'bill', id: bill.id }], await wantedForBill(bill), now);
+  await db.tx(async () => {
+    const bill = await db.get('SELECT * FROM bills WHERE id = ? FOR UPDATE', [billId]);
+    if (!bill) return forget('bill', billId);
+    await reconcile([{ type: 'bill', id: bill.id }], await wantedForBill(bill), now);
+  });
 }
 
 /** A goal and its steps are planned together: whether the goal's own date is announced depends on them. */
 async function replanGoal(goalId, now) {
-  const goal = await db.get('SELECT * FROM goals WHERE id = ?', [goalId]);
-  if (!goal) return forget('goal', goalId);
-  const milestones = await db.all('SELECT * FROM goal_milestones WHERE goal_id = ?', [goal.id]);
-  await forgetLostMilestones(goal.owner_id);
-  await reconcile([{ type: 'goal', id: goal.id }, ...milestones.map((m) => ({ type: 'milestone', id: m.id }))], await wantedForGoal(goal, milestones), now);
+  await db.tx(async () => {
+    // Every change of a step replans its goal, so the goal's row is the lock for its steps too.
+    const goal = await db.get('SELECT * FROM goals WHERE id = ? FOR UPDATE', [goalId]);
+    if (!goal) return forget('goal', goalId);
+    const milestones = await db.all('SELECT * FROM goal_milestones WHERE goal_id = ? ORDER BY id', [goal.id]);
+    await forgetLostMilestones(goal.owner_id);
+    await reconcile([{ type: 'goal', id: goal.id }, ...milestones.map((m) => ({ type: 'milestone', id: m.id }))], await wantedForGoal(goal, milestones), now);
+  });
 }
 
-/** After a person changed their time zone or their defaults, or lost access to a circle. */
+/**
+ * After a person changed their time zone or their defaults, or lost access to a circle. Also what repairs a
+ * person's plan from nothing: it derives every row again from the items themselves. Items are taken in the
+ * order of their ids, so that two of these running at once cannot wait on each other.
+ */
 async function replanUser(userId, now) {
-  await forgetLost(userId);
-  for (const t of await db.all("SELECT id FROM tasks WHERE (owner_id = ? OR assigned_to = ?) AND due_date IS NOT NULL AND status NOT IN ('completed','cancelled')", [userId, userId])) await replanTask(t.id, now);
-  for (const t of await db.all("SELECT DISTINCT source_id AS id FROM planned_reminders WHERE user_id = ? AND source_type = 'task' AND status = 'pending'", [userId])) await replanTask(t.id, now);
-  for (const b of await db.all("SELECT id FROM bills WHERE owner_id = ? AND status = 'unpaid'", [userId])) await replanBill(b.id, now);
-  for (const g of await db.all("SELECT id FROM goals WHERE owner_id = ? AND status = 'active'", [userId])) await replanGoal(g.id, now);
+  await db.tx(async () => {
+    await forgetLost(userId);
+    const tasks = await db.all(
+      `SELECT id FROM tasks WHERE (owner_id = ? OR assigned_to = ?) AND due_date IS NOT NULL AND status NOT IN ('completed','cancelled')
+       UNION SELECT source_id AS id FROM planned_reminders WHERE user_id = ? AND source_type = 'task' AND status = 'pending'
+       ORDER BY id`,
+      [userId, userId, userId]
+    );
+    for (const t of tasks) await replanTask(t.id, now);
+    for (const b of await db.all("SELECT id FROM bills WHERE owner_id = ? AND status = 'unpaid' ORDER BY id", [userId])) await replanBill(b.id, now);
+    for (const g of await db.all("SELECT id FROM goals WHERE owner_id = ? AND status = 'active' ORDER BY id", [userId])) await replanGoal(g.id, now);
+  });
 }
 
 /** The item is gone: so are its rows, whatever their state. */

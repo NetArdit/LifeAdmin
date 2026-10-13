@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
-const { isNonEmpty, ValidationError } = require('../lib/validate');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
+const { isNonEmpty, ValidationError, checkDate } = require('../lib/validate');
 const { addDays, addMonths, daysUntil, todayISO } = require('../lib/dates');
 const { logActivity, requireMembership, getMembership } = require('../lib/family');
 const { notifyFamily } = require('../lib/notify');
@@ -143,11 +143,12 @@ router.post(
 
 router.post(
   '/',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const b = req.body || {};
     if (!isNonEmpty(b.name)) throw new ValidationError('Bill name is required.', { name: 'Required' });
     if (typeof b.amount !== 'number' || b.amount <= 0) throw new ValidationError('Amount must be a positive number.', { amount: 'Required' });
     if (!isNonEmpty(b.dueDate)) throw new ValidationError('Due date is required.', { dueDate: 'Required' });
+    checkDate(b.dueDate, 'dueDate', 'Due date');
     if (b.category && !CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
     if (b.recurrence && !RECURRENCES.includes(b.recurrence)) throw new ValidationError('Invalid recurrence.', { recurrence: 'Invalid' });
 
@@ -187,7 +188,7 @@ router.post(
 
 router.patch(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
     const b = req.body || {};
@@ -201,6 +202,7 @@ router.patch(
     if (b.name !== undefined && !isNonEmpty(b.name)) throw new ValidationError('Bill name is required.', { name: 'Required' });
     if (b.amount !== undefined && (typeof b.amount !== 'number' || b.amount <= 0)) throw new ValidationError('Amount must be a positive number.', { amount: 'Required' });
     if (b.dueDate !== undefined && !isNonEmpty(b.dueDate)) throw new ValidationError('Due date is required.', { dueDate: 'Required' });
+    checkDate(b.dueDate, 'dueDate', 'Due date');
     if (b.category !== undefined && !CATEGORIES.includes(b.category)) throw new ValidationError('Invalid category.');
     if (b.recurrence !== undefined && !RECURRENCES.includes(b.recurrence)) throw new ValidationError('Invalid recurrence.', { recurrence: 'Invalid' });
     const map = { name: 'name', category: 'category', amount: 'amount', currency: 'currency', dueDate: 'due_date', recurrence: 'recurrence', notes: 'notes' };
@@ -227,7 +229,7 @@ router.patch(
 
 router.post(
   '/:id/pay',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
 
@@ -274,7 +276,7 @@ router.post(
 
 router.delete(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const bill = await db.get('SELECT * FROM bills WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
     if (!bill) return res.status(404).json({ error: 'Bill not found.' });
     await db.run('DELETE FROM bills WHERE id = ?', [bill.id]);

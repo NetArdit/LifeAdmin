@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
-const { asyncRoute } = require('../middleware/errorHandler');
-const { isNonEmpty, ValidationError } = require('../lib/validate');
+const { asyncRoute, txRoute } = require('../middleware/errorHandler');
+const { isNonEmpty, ValidationError, checkDate } = require('../lib/validate');
 const { requireMembership, getMembership, logActivity, sharedFamilyIdForTask } = require('../lib/family');
 const { VISIBILITIES, canAccessTask, taskAccessSql, canDeleteOrphanedTask } = require('../lib/taskAccess');
 const { notifyFamily, notifyUser } = require('../lib/notify');
@@ -161,11 +161,13 @@ router.get(
 
 router.post(
   '/',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const b = req.body || {};
     if (!isNonEmpty(b.title)) throw new ValidationError('Title is required.', { title: 'Required' });
     if (b.status && !STATUSES.includes(b.status)) throw new ValidationError('Invalid status.');
     if (b.priority && !PRIORITIES.includes(b.priority)) throw new ValidationError('Invalid priority.');
+    checkDate(b.dueDate, 'dueDate', 'Due date');
+    checkDate(b.recurrenceUntil, 'recurrenceUntil', 'End of repetition');
 
     let familyId = null;
     let visibility = 'private';
@@ -304,7 +306,7 @@ const normId = (v) => (v == null ? null : Number(v));
 
 router.patch(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
 
@@ -313,6 +315,8 @@ router.patch(
     if (b.title !== undefined && !isNonEmpty(b.title)) throw new ValidationError('Title is required.', { title: 'Required' });
     if (b.status !== undefined && !STATUSES.includes(b.status)) throw new ValidationError('Invalid status.');
     if (b.priority !== undefined && !PRIORITIES.includes(b.priority)) throw new ValidationError('Invalid priority.');
+    checkDate(b.dueDate, 'dueDate', 'Due date');
+    checkDate(b.recurrenceUntil, 'recurrenceUntil', 'End of repetition');
     const isOwner = t.owner_id === req.user.id;
     const fields = [];
     const params = [];
@@ -424,7 +428,7 @@ router.patch(
 
 router.post(
   '/:id/postpone',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     const t = await loadAccessibleTask(req);
     if (!t) return res.status(404).json({ error: 'Task not found.' });
     // Postponing moves a task later by a whole number of days (1 to 365).
@@ -451,7 +455,7 @@ router.post(
 
 router.delete(
   '/:id',
-  asyncRoute(async (req, res) => {
+  txRoute(async (req, res) => {
     // Deleting stays owner-only, with one narrow exception: the FAMILY owner may delete
     // a family task whose owner has left the family (otherwise it could never be removed).
     const t = await db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
