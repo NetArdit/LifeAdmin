@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 
 const { attachUser, requireAuth } = require('./src/middleware/requireAuth');
+const { sameOrigin } = require('./src/middleware/sameOrigin');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const ai = require('./src/lib/ai');
 
@@ -13,6 +14,8 @@ const PORT = process.env.PORT || 3001;
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(attachUser);
+// Everything under /api that changes something must come from this site's own pages.
+app.use('/api', sameOrigin);
 
 // --- Public routes ---------------------------------------------------------
 app.use('/api/auth', require('./src/routes/auth'));

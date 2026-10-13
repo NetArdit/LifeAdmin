@@ -115,6 +115,11 @@ async function handle(row, token, { now = Date.now(), deliver = deliverToBell } 
   }
 }
 
+/** What the clock also tidies: sessions that ran out, and with them the devices that were bound to them. */
+async function housekeeping() {
+  return (await db.run("DELETE FROM sessions WHERE expires_at <= datetime('now')")).changes;
+}
+
 /** One run of the clock. Answers counts only. */
 async function runDue(options = {}) {
   const started = Date.now();
@@ -136,4 +141,4 @@ async function runDue(options = {}) {
   return counts;
 }
 
-module.exports = { runDue, claimDue, handle, deliverToBell, BATCH, LEASE_SECONDS, MAX_ATTEMPTS, STALE_HOURS };
+module.exports = { runDue, claimDue, handle, deliverToBell, housekeeping, BATCH, LEASE_SECONDS, MAX_ATTEMPTS, STALE_HOURS };

@@ -228,9 +228,19 @@ test('account recovery + auth hardening', async (t) => {
 
   await t.test('a spoofed Host header cannot influence the reset link', async () => {
     const { payload } = await newUser();
-    await fetch(app.base + '/api/auth/forgot-password', {
+    // A request that says it comes from another site is refused outright (middleware/sameOrigin): no mail.
+    const before = mailer.getOutbox().length;
+    const fromElsewhere = await fetch(app.base + '/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Forwarded-Host': 'evil.example', 'Origin': 'https://evil.example' },
+      body: JSON.stringify({ email: payload.email }),
+    });
+    assert.equal(fromElsewhere.status, 403);
+    assert.equal(mailer.getOutbox().length, before);
+    // Without that claim, a forged host still cannot get into the link.
+    await fetch(app.base + '/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Forwarded-Host': 'evil.example' },
       body: JSON.stringify({ email: payload.email }),
     });
     const mail = mailer.getOutbox().pop();

@@ -16,6 +16,9 @@ test('push: a server without keys says so and takes no subscription', async (t) 
   // A developer's .env may hold a pair: empty values here are not replaced by it.
   process.env.VAPID_PUBLIC_KEY = '';
   process.env.VAPID_PRIVATE_KEY = '';
+  process.env.PUSH_STORE_KEY = '';
+  process.env.APP_BASE_URL = '';
+  process.env.ALLOWED_ORIGINS = '';
   const app = await startApp();
   t.after(() => app.close());
   const c = makeClient(app.base);
@@ -28,6 +31,7 @@ test('push: a server without keys says so and takes no subscription', async (t) 
   const keys = require('web-push').generateVAPIDKeys();
   process.env.VAPID_PUBLIC_KEY = keys.publicKey;
   process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+  process.env.PUSH_STORE_KEY = b64(32);
   const db = require('../src/db');
   const push = require('../src/lib/push');
   const sent = [];
@@ -72,7 +76,11 @@ test('push: a server without keys says so and takes no subscription', async (t) 
     ];
     for (const bad of wrong) assert.equal((await me.post('/api/push/subscription', bad)).status, 400, JSON.stringify(bad).slice(0, 80));
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM push_subscriptions')).c, 0);
-    for (const host of ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', 'wns2-par02p.notify.windows.com']) {
+    // Not on the list until a real subscription has shown it, and never more than one label deep.
+    for (const host of ['wns2-par02p.notify.windows.com', 'a.b.push.apple.com', 'evil.push.services.mozilla.com.example']) {
+      assert.equal((await me.post('/api/push/subscription', browser(host))).status, 400, host);
+    }
+    for (const host of ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com']) {
       assert.equal((await me.post('/api/push/subscription', browser(host))).status, 201, host);
     }
     assert.equal((await me.get('/api/push/status')).data.devices, 1, 'one browser, one subscription: the newer replaced the older');
@@ -118,6 +126,7 @@ test('push: a server without keys says so and takes no subscription', async (t) 
       assert.equal(JSON.parse(push.payloadOf({ kind: 'chat', path })).u, '/', String(path));
     }
     assert.equal(JSON.parse(push.payloadOf({ kind: 'Buy milk, says Arta' })).k, 'update', 'no free text travels as a kind');
+    for (const tag of ['Buy milk', 'chat-9-arta', 'x'.repeat(40), 'chat_9']) assert.equal(JSON.parse(push.payloadOf({ kind: 'chat', tag })).g, null, tag);
   });
 
   await t.test('a subscription the push service no longer knows is removed; another failure keeps it and is counted', async () => {
@@ -177,6 +186,35 @@ test('push: a server without keys says so and takes no subscription', async (t) 
     await db.run("UPDATE sessions SET expires_at = '2000-01-01 00:00:00' WHERE user_id = ?", [me.id]);
     assert.deepEqual(await push.sendToUser(me.id, { kind: 'reminder' }), { sent: 0, gone: 0, failed: 0 });
     assert.equal(sent.length, 0);
+    // It is not counted as a device either, and the clock removes it with its session.
+    const again = makeClient(app.base);
+    await again.post('/api/auth/login', me.login);
+    assert.equal((await again.get('/api/push/status')).data.devices, 0);
+    const ended = await require('../src/lib/reminderWorker').housekeeping();
+    assert.ok(ended >= 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id = ?', [me.id])).c, 0);
+  });
+
+  await t.test('rows stored under a key the server no longer has are dropped, not sent and not fatal', async () => {
+    const me = await person();
+    await me.c.post('/api/push/subscription', browser());
+    const key = process.env.PUSH_STORE_KEY;
+    process.env.PUSH_STORE_KEY = b64(32);
+    try {
+      assert.deepEqual(await push.sendToUser(me.id, { kind: 'reminder' }), { sent: 0, gone: 1, failed: 0 });
+      assert.equal(sent.length, 0);
+    } finally {
+      process.env.PUSH_STORE_KEY = key;
+    }
+    assert.equal((await me.c.get('/api/push/status')).data.devices, 0);
+    // Without that key the server does not pretend to be ready.
+    process.env.PUSH_STORE_KEY = 'short';
+    try {
+      assert.equal((await me.c.get('/api/push/status')).data.configured, false);
+      assert.equal((await me.c.post('/api/push/subscription', browser())).status, 503);
+    } finally {
+      process.env.PUSH_STORE_KEY = key;
+    }
   });
 
   await t.test('no more than a handful of devices for one account: the oldest go', async () => {
@@ -189,10 +227,34 @@ test('push: a server without keys says so and takes no subscription', async (t) 
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id = ?', [me.id])).c, push.MAX_DEVICES);
   });
 
-  await t.test('a request that says it comes from another site is refused', async () => {
+  await t.test('a request that says it comes from another site is refused, on every route that changes something', async () => {
     const user = uniqueUser();
     const signup = await fetch(`${app.base}/api/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(user) });
     const cookie = signup.headers.get('set-cookie').split(';')[0];
+    const call = (method, url, headers, body) => fetch(app.base + url, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const task = { title: 'From elsewhere' };
+    assert.equal((await call('POST', '/api/tasks', { Origin: 'https://evil.example' }, task)).status, 403);
+    assert.equal((await call('POST', '/api/tasks', { 'Sec-Fetch-Site': 'cross-site' }, task)).status, 403);
+    assert.equal((await call('POST', '/api/tasks', { 'Sec-Fetch-Site': 'same-site' }, task)).status, 403, 'a sibling address is not this site');
+    assert.equal((await call('POST', '/api/auth/logout', { Origin: 'https://evil.example' }, {})).status, 403);
+    assert.equal((await call('PATCH', '/api/settings/preferences', { Origin: 'https://evil.example' }, { theme: 'dark' })).status, 403);
+    assert.equal((await call('DELETE', '/api/tasks/1', { Origin: 'https://evil.example' })).status, 403);
+    assert.equal((await db.get("SELECT COUNT(*) AS c FROM tasks WHERE title = 'From elsewhere'")).c, 0);
+    // Reading is not a change; this site's own pages and a client that is not a browser are let through.
+    assert.equal((await call('GET', '/api/tasks', { Origin: 'https://evil.example' })).status, 200);
+    assert.equal((await call('POST', '/api/tasks', { Origin: app.base, 'Sec-Fetch-Site': 'same-origin' }, task)).status, 201);
+    assert.equal((await call('POST', '/api/tasks', {}, task)).status, 201);
+    // Where the site's address is configured, the request's own Host is not believed.
+    process.env.APP_BASE_URL = 'https://lifeadmin.example';
+    try {
+      assert.equal((await call('POST', '/api/tasks', { Origin: app.base }, task)).status, 403);
+      assert.equal((await call('POST', '/api/tasks', { Origin: 'https://lifeadmin.example' }, task)).status, 201);
+      process.env.ALLOWED_ORIGINS = `https://www.lifeadmin.example, ${app.base}`;
+      assert.equal((await call('POST', '/api/tasks', { Origin: app.base }, task)).status, 201);
+    } finally {
+      process.env.APP_BASE_URL = '';
+      process.env.ALLOWED_ORIGINS = '';
+    }
     const send = (origin) => fetch(`${app.base}/api/push/subscription`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie, ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(browser()) });
     assert.equal((await send('https://evil.example')).status, 403);
     assert.equal((await send('null')).status, 403);

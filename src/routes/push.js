@@ -9,23 +9,7 @@ const router = express.Router();
 const testLimit = createLimiter({ windowMs: 60 * 1000, max: 5 });
 const subscribeLimit = createLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
 
-// These requests change what a device receives. The session cookie is SameSite=Lax and the body is JSON,
-// which already keeps another site's form out; on top of that, a browser that says where the request comes
-// from must say "from this site".
-function sameSite(req, res, next) {
-  const origin = req.get('origin');
-  if (!origin) return next();
-  let host = null;
-  try {
-    host = new URL(origin).host;
-  } catch {}
-  const allowed = [req.get('host')];
-  try {
-    if (process.env.APP_BASE_URL) allowed.push(new URL(process.env.APP_BASE_URL).host);
-  } catch {}
-  if (!host || !allowed.includes(host)) return res.status(403).json({ error: 'This request did not come from LifeAdmin.' });
-  next();
-}
+// That these requests come from this site's own pages is checked for the whole API (middleware/sameOrigin).
 
 router.get(
   '/status',
@@ -37,7 +21,6 @@ router.get(
 
 router.post(
   '/subscription',
-  sameSite,
   asyncRoute(async (req, res) => {
     if (!push.config().configured) return res.status(503).json({ error: 'Notifications are not set up on this server yet.' });
     if (subscribeLimit.consume(`sub|${req.user.id}`)) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
@@ -48,7 +31,6 @@ router.post(
 
 router.delete(
   '/subscription',
-  sameSite,
   asyncRoute(async (req, res) => {
     await push.removeForSession(req.user.id, req.sessionId);
     res.json({ ok: true, ...(await push.statusFor(req.user.id, req.sessionId)) });
@@ -58,7 +40,6 @@ router.delete(
 // One generic notification to the device that asks, so that its owner sees that it arrives.
 router.post(
   '/test',
-  sameSite,
   asyncRoute(async (req, res) => {
     if (!push.config().configured) return res.status(503).json({ error: 'Notifications are not set up on this server yet.' });
     if (testLimit.consume(`test|${req.user.id}`)) return res.status(429).json({ error: 'Too many attempts. Please wait a minute and try again.' });

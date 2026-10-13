@@ -19,21 +19,26 @@ const { ValidationError } = require('./validate');
 const MAX_DEVICES = 10;
 // The push services of the browsers there are. An address anywhere else is not a subscription: the server
 // would be made to call a host of somebody's choosing.
-const HOSTS = [/^fcm\.googleapis\.com$/, /^([a-z0-9-]+\.)*push\.services\.mozilla\.com$/, /^([a-z0-9-]+\.)*push\.apple\.com$/, /^([a-z0-9-]+\.)*notify\.windows\.com$/];
+// Chrome and the browsers built on it, Firefox, Safari. Apple documents its pattern; Edge on Windows is said
+// to use a Microsoft host, which is added here only once a real Edge subscription has shown its name.
+const HOSTS = [/^fcm\.googleapis\.com$/, /^([a-z0-9-]+\.)?push\.services\.mozilla\.com$/, /^([a-z0-9-]+\.)?push\.apple\.com$/];
 const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
 
 function config() {
   const publicKey = process.env.VAPID_PUBLIC_KEY || '';
   const privateKey = process.env.VAPID_PRIVATE_KEY || '';
   const subject = process.env.VAPID_SUBJECT || (process.env.MAIL_FROM_ADDRESS ? `mailto:${process.env.MAIL_FROM_ADDRESS}` : 'mailto:admin@lifeadmin.local');
-  return { publicKey, privateKey, subject, configured: !!(publicKey && privateKey) };
+  // The key that keeps stored subscriptions unreadable is a secret of its own: it must outlive a change of
+  // the VAPID pair, and the other way round.
+  const storeKey = process.env.PUSH_STORE_KEY || '';
+  return { publicKey, privateKey, subject, storeKey, configured: !!(publicKey && privateKey && storeKey.length >= 32) };
 }
 
 // ---- keeping the address and the secret unreadable in the database -----------------------------------------
 
 function storeKey() {
-  const secret = process.env.PUSH_STORE_KEY || config().privateKey;
-  if (!secret) throw new Error('Push is not configured.');
+  const secret = config().storeKey;
+  if (secret.length < 32) throw new Error('Push is not configured.');
   return Buffer.from(crypto.hkdfSync('sha256', secret, 'lifeadmin', 'push-subscriptions-v1', 32));
 }
 
@@ -99,7 +104,8 @@ async function removeForSession(userId, sessionId) {
 
 async function statusFor(userId, sessionId) {
   const here = await db.get('SELECT id FROM push_subscriptions WHERE user_id = ? AND session_id = ?', [userId, sessionId]);
-  const all = await db.get('SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id = ?', [userId]);
+  // Only devices that would really receive: a session that ran out no longer does.
+  const all = await db.get("SELECT COUNT(*) AS c FROM push_subscriptions p JOIN sessions s ON s.id = p.session_id WHERE p.user_id = ? AND s.expires_at > datetime('now')", [userId]);
   return { thisDevice: !!here, devices: Number(all.c) };
 }
 
@@ -126,13 +132,23 @@ function safePath(path) {
  */
 function payloadOf({ kind = 'update', path = '/', tag = null } = {}) {
   const KINDS = ['update', 'reminder', 'chat', 'comment', 'task', 'test'];
-  return JSON.stringify({ k: KINDS.includes(kind) ? kind : 'update', u: safePath(path), g: typeof tag === 'string' ? tag.slice(0, 64) : null });
+  // A tag is a word and a number ("chat-812"), made by the code that sends: never a person's text.
+  return JSON.stringify({ k: KINDS.includes(kind) ? kind : 'update', u: safePath(path), g: typeof tag === 'string' && /^[a-z]{1,16}(-[0-9]{1,18})?$/.test(tag) ? tag : null });
 }
 
 async function sendToRow(row, payload, { ttl = 3600, urgency = 'normal' } = {}) {
   const cfg = config();
+  let subscription;
   try {
-    await sender({ endpoint: unseal(row.endpoint), keys: { p256dh: row.p256dh, auth: unseal(row.auth) } }, payload, {
+    subscription = { endpoint: unseal(row.endpoint), keys: { p256dh: row.p256dh, auth: unseal(row.auth) } };
+  } catch {
+    // Stored under a key this server no longer has (PUSH_STORE_KEY was replaced): the row can never be used
+    // again. The device has to turn notifications on once more.
+    await db.run('DELETE FROM push_subscriptions WHERE id = ?', [row.id]);
+    return 'gone';
+  }
+  try {
+    await sender(subscription, payload, {
       vapidDetails: { subject: cfg.subject, publicKey: cfg.publicKey, privateKey: cfg.privateKey },
       TTL: ttl,
       urgency,
