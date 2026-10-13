@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DeviceNotifications, ReminderTimes } from './DeviceNotifications.jsx';
 
 const ITEMS = [
   ['task', 'Task reminders & deadlines'],
@@ -49,6 +50,9 @@ export function NotificationsSection({ ctx }) {
   }
 
   return (
+    <div className="stack">
+    <DeviceNotifications ctx={ctx} />
+    <ReminderTimes ctx={ctx} />
     <div className="card card-pad">
       <div className="card-header">
         <span className="card-title">Notification preferences</span>
@@ -68,6 +72,7 @@ export function NotificationsSection({ ctx }) {
           </label>
         ))}
       </div>
+    </div>
     </div>
   );
 }

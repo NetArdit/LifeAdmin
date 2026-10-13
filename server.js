@@ -35,6 +35,7 @@ app.use('/api/timeline', requireAuth, require('./src/routes/timeline'));
 app.use('/api/search', requireAuth, require('./src/routes/search'));
 app.use('/api/ai', requireAuth, require('./src/routes/ai'));
 app.use('/api/settings', requireAuth, require('./src/routes/settings'));
+app.use('/api/push', requireAuth, require('./src/routes/push'));
 app.use('/api/demo', requireAuth, require('./src/routes/demo'));
 
 // --- Static frontend (single-page app) --------------------------------------

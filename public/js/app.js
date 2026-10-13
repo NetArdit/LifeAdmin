@@ -4,6 +4,7 @@ import { toast, escapeHtml } from './components/toast.js';
 import { closeModal } from './components/modal.js';
 import { initials } from './format.js';
 import { applyTheme } from './theme.js';
+import * as push from './push.js';
 
 // Re-exported for the (still-vanilla, untouched) public/js/pages/settings.js
 // rollback path, which imports applyTheme from here — see theme.js for why
@@ -101,11 +102,19 @@ async function boot() {
     await refreshFamilies();
     renderShell();
     startNotificationPolling();
+    afterSignIn();
   } else {
     renderAuth();
   }
 
   window.addEventListener('hashchange', route);
+  // A notification that was pressed while the app is open: go where it points, through the normal router.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const data = event.data || {};
+      if (data.type === 'la-open' && typeof data.path === 'string' && /^\/(#\/[A-Za-z0-9/_-]{0,80})?$/.test(data.path)) location.hash = data.path.slice(1) || '#/dashboard';
+    });
+  }
 
   // A failed action must never fail silently. Several handlers across the
   // pages await an API call with no try/catch of their own (delete a goal,
@@ -143,6 +152,7 @@ async function onAuthed(user) {
   await refreshFamilies();
   renderShell();
   startNotificationPolling();
+  afterSignIn();
 }
 
 // Session-expiry fix (Daily Product Quality phase). Root cause: every API
@@ -174,6 +184,14 @@ async function onAuthed(user) {
 //   renderAuth() the initial boot path already uses — no second login
 //   screen implementation, no redirect loop, just the normal "logged out"
 //   state.
+// What follows every sign-in on this device, in the background: the account learns this browser's time zone
+// if it has none, and notifications that this same person had turned on here are connected again.
+function afterSignIn() {
+  if (!state.user) return;
+  push.captureZone(api, state.user);
+  push.resume(api, state.user);
+}
+
 function handleSessionExpired() {
   if (state.sessionExpiredHandled || !state.user) return;
   state.sessionExpiredHandled = true;
@@ -372,6 +390,8 @@ function toggleAccountMenu() {
     toggleNotificationsPanel();
   });
   document.getElementById('menu-logout').addEventListener('click', async () => {
+    // This browser stops receiving for the person who leaves; the server's half goes with the session.
+    await push.forgetLocal();
     await api.post('/api/auth/logout');
     location.reload();
   });

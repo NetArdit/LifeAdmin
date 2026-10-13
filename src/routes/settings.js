@@ -75,12 +75,13 @@ router.get(
 router.patch(
   '/reminders',
   txRoute(async (req, res) => {
-    const { timezone, defaults } = req.body || {};
+    const { timezone, defaults, onlyIfUnset } = req.body || {};
     const fields = [];
     const params = [];
-    if (timezone !== undefined) {
+    // The browser reports its zone once, on its own: that never replaces a zone the person already has.
+    if (timezone !== undefined && !(onlyIfUnset && req.user.timezone)) {
       if (!reminders.isZone(timezone)) throw new ValidationError('Unknown time zone.', { timezone: 'Unknown' });
-      fields.push('timezone = ?');
+      fields.push(onlyIfUnset ? 'timezone = COALESCE(timezone, ?)' : 'timezone = ?');
       params.push(timezone);
     }
     if (defaults !== undefined) {

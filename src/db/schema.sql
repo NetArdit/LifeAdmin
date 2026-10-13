@@ -303,3 +303,22 @@ CREATE TABLE IF NOT EXISTS planned_reminders (
 
 CREATE INDEX IF NOT EXISTS idx_planned_due ON planned_reminders(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_planned_source ON planned_reminders(source_type, source_id, status);
+
+-- Browsers and phones that asked for notifications (src/lib/push.js). One row per browser. It belongs to the
+-- session it was made in and goes with it. The address and the secret are stored encrypted; endpoint_hash is
+-- what tells two rows of the same browser apart.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  endpoint_hash TEXT NOT NULL UNIQUE,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  failures INTEGER NOT NULL DEFAULT 0,
+  last_ok_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_session ON push_subscriptions(session_id);
