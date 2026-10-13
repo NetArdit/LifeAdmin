@@ -315,6 +315,40 @@ test('reminders: what is planned', async (t) => {
     assert.deepEqual(await picture(), before);
   });
 
+  await t.test('a transactional route answers only after its changes are stored', async () => {
+    const { txRoute } = require('../src/middleware/errorHandler');
+    await db.exec('CREATE TABLE IF NOT EXISTS tx_probe (id integer PRIMARY KEY, parent integer REFERENCES tx_probe(id) DEFERRABLE INITIALLY DEFERRED)');
+    const call = (handler) =>
+      new Promise((resolve) => {
+        const seen = { status: null, body: null, error: null };
+        const res = { status: (c) => ((seen.status = c), res), json: (b) => ((seen.body = b), resolve(seen), res) };
+        txRoute(handler)({}, res, (err) => ((seen.error = err), resolve(seen)));
+      });
+
+    const ok = await call(async (req, res) => {
+      await db.run('INSERT INTO tx_probe (id) VALUES (1)');
+      res.status(201).json({ ok: true });
+    });
+    assert.deepEqual({ status: ok.status, body: ok.body, error: ok.error }, { status: 201, body: { ok: true }, error: null });
+
+    // The handler answered and then failed: the answer is never written.
+    const late = await call(async (req, res) => {
+      await db.run('INSERT INTO tx_probe (id) VALUES (2)');
+      res.json({ ok: true });
+      throw new Error('after the answer');
+    });
+    assert.deepEqual({ status: late.status, body: late.body, message: late.error && late.error.message }, { status: null, body: null, message: 'after the answer' });
+
+    // The handler finished without an error and the COMMIT itself fails (a constraint checked only then).
+    const commit = await call(async (req, res) => {
+      await db.run('INSERT INTO tx_probe (id, parent) VALUES (3, 999)');
+      res.json({ ok: true });
+    });
+    assert.equal(commit.body, null, 'no "done" for what was rolled back');
+    assert.ok(commit.error);
+    assert.deepEqual((await db.all('SELECT id FROM tx_probe ORDER BY id')).map((r) => r.id), [1]);
+  });
+
   await t.test('a circle task: the owner and the assignee are reminded, each in their own zone; nobody else; not after leaving', async () => {
     const owner = await person();
     const helper = await person();

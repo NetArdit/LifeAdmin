@@ -10,8 +10,29 @@ function asyncRoute(fn) {
 
 // A route that changes an item AND what depends on it (its planned reminders): everything the handler does
 // in the database happens together or not at all. Not for a handler that waits on another service.
+//
+// The handler's answer is held back until the transaction has been committed: a client is told "done" only
+// for what is really stored. If the handler or the commit fails, what it had answered is dropped and the
+// error handler answers instead. Such a handler answers with res.status() and res.json() only.
 function txRoute(fn) {
-  return asyncRoute((req, res, next) => require('../db').tx(() => fn(req, res, next)));
+  return asyncRoute(async (req, res, next) => {
+    let status = 200;
+    let body;
+    let answered = false;
+    const held = {
+      status(code) {
+        status = code;
+        return held;
+      },
+      json(value) {
+        body = value;
+        answered = true;
+        return held;
+      },
+    };
+    await require('../db').tx(() => fn(req, held, next));
+    if (answered) res.status(status).json(body);
+  });
 }
 
 // Centralized error handler. Never leaks stack traces or internals to the client.
