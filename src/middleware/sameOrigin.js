@@ -24,9 +24,13 @@ function originOf(value) {
 
 function allowedOrigins(req) {
   const configured = [process.env.APP_BASE_URL, ...String(process.env.ALLOWED_ORIGINS || '').split(',')].map((v) => originOf((v || '').trim())).filter(Boolean);
-  if (configured.length) return configured;
-  const host = req.get('host');
-  return host ? [`http://${host}`, `https://${host}`] : [];
+  // The page's own address is always "this site": a page of another site cannot make a browser send an Origin
+  // equal to THIS server's Host. So a wrong or missing APP_BASE_URL can no longer lock every person out of
+  // signing in (it did: the configured address differed from the real one and every POST was refused).
+  // The Host the proxy forwarded counts too (behind a CDN the function sees its own name in Host).
+  const hosts = [req.get('x-forwarded-host'), req.get('host')].filter(Boolean).map((h) => String(h).split(',')[0].trim());
+  const own = hosts.flatMap((h) => [`http://${h}`, `https://${h}`]);
+  return [...configured, ...own];
 }
 
 function sameOrigin(req, res, next) {

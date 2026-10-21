@@ -245,10 +245,12 @@ test('push: a server without keys says so and takes no subscription', async (t) 
     assert.equal((await call('GET', '/api/tasks', { Origin: 'https://evil.example' })).status, 200);
     assert.equal((await call('POST', '/api/tasks', { Origin: app.base, 'Sec-Fetch-Site': 'same-origin' }, task)).status, 201);
     assert.equal((await call('POST', '/api/tasks', {}, task)).status, 201);
-    // Where the site's address is configured, the request's own Host is not believed.
+    // A configured address is accepted in addition; the page's own address (Origin equal to this server's Host)
+    // is always this site, so a wrong APP_BASE_URL can never lock people out (test/same-origin.test.js).
     process.env.APP_BASE_URL = 'https://lifeadmin.example';
     try {
-      assert.equal((await call('POST', '/api/tasks', { Origin: app.base }, task)).status, 403);
+      assert.equal((await call('POST', '/api/tasks', { Origin: app.base }, task)).status, 201);
+      assert.equal((await call('POST', '/api/tasks', { Origin: 'https://evil.example' }, task)).status, 403);
       assert.equal((await call('POST', '/api/tasks', { Origin: 'https://lifeadmin.example' }, task)).status, 201);
       process.env.ALLOWED_ORIGINS = `https://www.lifeadmin.example, ${app.base}`;
       assert.equal((await call('POST', '/api/tasks', { Origin: app.base }, task)).status, 201);
