@@ -59,7 +59,7 @@
 .member-card { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); }
 .member-role { text-transform: capitalize; }
 
-.chat-window { display: flex; flex-direction: column; height: calc(100vh - var(--shell-chrome-height) - 220px); min-height: 360px; }
+.chat-window { display: flex; flex-direction: column; height: calc(100vh - var(--shell-chrome-height) - 220px); height: calc(100dvh - var(--shell-chrome-height) - 220px - var(--kb-inset, 0px)); min-height: 360px; }
 .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2); }
 .chat-bubble-row { display: flex; gap: var(--sp-2); align-items: flex-end; max-width: 80%; }
 .chat-bubble-row.self { align-self: flex-end; flex-direction: row-reverse; }
@@ -226,6 +226,7 @@ a.timeline-item:hover { background: var(--bg-hover); }
    "don't guess, measure" approach this comment already committed to. */
 .page.assistant-page-flex {
   display: flex; flex-direction: column; height: calc(100vh - var(--shell-chrome-height));
+  height: calc(100dvh - var(--shell-chrome-height) - var(--kb-inset, 0px));
   padding-bottom: var(--sp-6);
 }
 @media (max-width: 640px) {
@@ -281,3 +282,20 @@ a.timeline-item:hover { background: var(--bg-hover); }
 .member-card { flex-wrap: wrap; }
 .member-actions { flex-basis: 100%; display: flex; }
 .member-lifecycle-note { margin-top: var(--sp-4); }
+
+/* Placed last on purpose: these must win over the sizes the component classes above set for mouse use. */
+/* 44 x 44 px at least for what a finger presses (WCAG 2.5.5 / Apple HIG), on touch screens only. */
+@media (pointer: coarse) {
+  .pill { min-width: 44px; justify-content: center; }
+  .card-header a, .card-header .text-xs { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+  .btn, .btn-sm, .btn-icon, .icon-btn, .tab, .input, .select { min-height: 44px; }
+  .btn-icon, .icon-btn { min-width: 44px; }
+  .checkbox-row { min-height: 44px; }
+  .pill, .bucket-toggle, .row-main, .row-item-btn { min-height: 44px; }
+  /* The round tick keeps its look; the button around it is the size of a finger. */
+  .row-check { width: 44px; height: 44px; border-color: transparent; background: transparent; position: relative; }
+  .row-check::before { content: ''; position: absolute; width: 21px; height: 21px; border-radius: 50%; border: 1.5px solid var(--surface-border-strong); background: var(--bg-elevated); }
+  .row-check.checked { background: transparent; border-color: transparent; }
+  .row-check.checked::before { background: var(--accent-500); border-color: var(--accent-500); }
+  .row-check svg { position: relative; }
+}

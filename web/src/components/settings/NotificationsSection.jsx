@@ -72,6 +72,15 @@ export function NotificationsSection({ ctx }) {
           </label>
         ))}
       </div>
+      <div className="stack" style={{ marginTop: 'var(--sp-4)' }}>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={prefs.richPush === true} onChange={(e) => handleToggle('richPush', e.target.checked)} />
+          Show an encouraging line on my lock screen for goal reminders
+        </label>
+        <p className="text-xs muted">
+          Off by default: the lock screen then says only “Time for a small step toward your goal.” The line is a short, general sentence. It never contains your goal’s name; that stays inside the app.
+        </p>
+      </div>
     </div>
     </div>
   );

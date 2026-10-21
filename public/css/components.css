@@ -256,7 +256,7 @@
    page behind it sharp and legible while still reading as "inactive". */
 .modal-backdrop { position: absolute; inset: 0; background: rgba(20, 20, 18, 0.4); animation: fade-in var(--transition-base); }
 .modal-panel {
-  position: relative; margin: 6vh auto; width: min(560px, 92vw); max-height: 88vh; overflow-y: auto;
+  position: relative; margin: 6vh auto; width: min(560px, 92vw); max-height: 88vh; max-height: 88dvh; overflow-y: auto;
   background: var(--bg-elevated); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   animation: modal-in var(--transition-base);
 }
@@ -297,6 +297,11 @@
   display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--surface-border);
   overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
 }
+/* A strip that scrolls ONLY sideways (this one and the module rail share the rule): a vertical or diagonal
+   swipe that starts on it neither moves it up and down nor drags the page. A swipe that starts anywhere else
+   still scrolls the page as usual. The last label keeps room after it so it is never cut off. */
+.tabs, .module-rail { overflow-y: hidden; touch-action: pan-x; overscroll-behavior-y: none; }
+.tabs::after, .module-rail::after { content: ''; flex: 0 0 var(--sp-3); }
 .tab {
   padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); font-weight: 600; color: var(--text-tertiary);
   border-bottom: 2px solid transparent; margin-bottom: -1px;

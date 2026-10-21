@@ -23,10 +23,15 @@ test('auth', async (t) => {
     assert.ok(res.data.fields.password);
   });
 
-  await t.test('signup succeeds with valid data and sets a session (GET /me returns the user)', async () => {
+  await t.test('signup answers 202 without a session; the person then signs in (GET /me returns the user)', async () => {
     const c = makeClient(app.base);
+    const payload = uniqueUser();
+    const signup = await c.post('/api/auth/signup', payload);
+    assert.equal(signup.status, 202);
+    assert.equal(signup.data.user, undefined);
+    assert.equal(c.cookie(), '', 'signup starts no session');
     const { res } = await signUp(c);
-    assert.equal(res.status, 201);
+    assert.equal(res.status, 200);
     assert.ok(res.data.user.id);
     assert.equal(res.data.user.emailVerified, false);
 
@@ -35,13 +40,31 @@ test('auth', async (t) => {
     assert.equal(me.data.user.id, res.data.user.id);
   });
 
-  await t.test('signup rejects a duplicate email/phone', async () => {
+  await t.test('signup answers the same for an email that already has an account, and does not touch that account', async () => {
     const c = makeClient(app.base);
     const { payload } = await signUp(c);
-
     const c2 = makeClient(app.base);
-    const dup = await c2.post('/api/auth/signup', uniqueUser({ email: payload.email }));
-    assert.equal(dup.status, 400);
+    const fresh = await c2.post('/api/auth/signup', uniqueUser());
+    const dup = await c2.post('/api/auth/signup', uniqueUser({ email: payload.email, password: 'another-pass-99', confirmPassword: 'another-pass-99' }));
+    assert.equal(dup.status, fresh.status);
+    assert.deepEqual(dup.data, fresh.data);
+    assert.equal(c2.cookie(), '');
+    const again = makeClient(app.base);
+    assert.equal((await again.post('/api/auth/login', { identifier: payload.email, password: 'another-pass-99' })).status, 400, 'the old account keeps its own password');
+    assert.equal((await again.post('/api/auth/login', { identifier: payload.email, password: payload.password })).status, 200);
+  });
+
+  await t.test('the phone number is optional; a wrong one is still refused', async () => {
+    const c = makeClient(app.base);
+    const none = uniqueUser();
+    delete none.phone;
+    assert.equal((await c.post('/api/auth/signup', none)).status, 202);
+    const login = await c.post('/api/auth/login', { identifier: none.email, password: none.password });
+    assert.equal(login.status, 200);
+    assert.equal(login.data.user.phone, null);
+    assert.equal((await c.post('/api/auth/signup', uniqueUser({ phone: '12' }))).status, 400);
+    const blank = uniqueUser({ phone: '' });
+    assert.equal((await c.post('/api/auth/signup', blank)).status, 202);
   });
 
   await t.test('login fails with wrong password, succeeds with correct password', async () => {

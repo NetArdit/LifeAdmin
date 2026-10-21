@@ -1,7 +1,9 @@
 const express = require('express');
 const db = require('../db');
 const { asyncRoute, txRoute } = require('../middleware/errorHandler');
-const { isNonEmpty, isPhone, normalizePhone, ValidationError } = require('../lib/validate');
+const { isNonEmpty, isPhone, isEmail, normalizePhone, ValidationError } = require('../lib/validate');
+const { sendMail } = require('../lib/mailer');
+const { resetBaseUrl } = require('../lib/passwordReset');
 const {
   requireMembership,
   requireRole,
@@ -147,6 +149,154 @@ router.post(
     });
 
     res.status(201).json({ family: mapFamily(family, await membersFor(family.id), req.user.id) });
+  })
+);
+
+// --- Invitations by email --------------------------------------------------------
+// The invitation code above keeps working exactly as before; this is the other door. An invitation names an
+// email address. It can only be answered by an account whose email is VERIFIED and is that address, so a
+// stranger who registers someone's address cannot take the seat. Whether an address has an account is never
+// revealed: sending an invitation answers the same way in every case.
+const INVITE_DAYS = 7;
+const INVITE_SENT_MESSAGE = 'If that address can be invited, the invitation is on its way. It is valid for 7 days.';
+const INVITE_GONE = 'This invitation is not available any more.';
+
+function mapInvitation(r) {
+  return { id: r.id, familyId: r.family_id, familyName: r.family_name, email: r.email, status: r.status, expiresAt: r.expires_at, createdAt: r.created_at };
+}
+
+function requireVerifiedEmail(user) {
+  if (!user.email_verified) {
+    const err = new ValidationError('Confirm your email address first: use the link we sent you (Settings > Security).');
+    err.status = 403;
+    throw err;
+  }
+}
+
+async function expireOld() {
+  await db.run("UPDATE circle_invitations SET status = 'expired' WHERE status = 'pending' AND expires_at <= datetime('now')");
+}
+
+// What is waiting for me: only ever for my own verified address.
+router.get(
+  '/invitations/mine',
+  asyncRoute(async (req, res) => {
+    if (!req.user.email_verified) return res.json({ invitations: [], needsVerification: true });
+    await expireOld();
+    const rows = await db.all(
+      `SELECT i.*, f.name AS family_name FROM circle_invitations i JOIN families f ON f.id = i.family_id
+       WHERE i.email = ? AND i.status = 'pending' ORDER BY i.created_at DESC`,
+      [req.user.email]
+    );
+    res.json({ invitations: rows.map(mapInvitation), needsVerification: false });
+  })
+);
+
+async function answerInvitation(req, res, accept) {
+  requireVerifiedEmail(req.user);
+  const id = Number(req.params.invId);
+  if (!Number.isInteger(id)) throw new ValidationError(INVITE_GONE);
+  const result = await db.tx(async () => {
+    // One statement decides: only a pending, unexpired invitation to MY address, and only once.
+    const row = await db.get(
+      `UPDATE circle_invitations SET status = ?, responded_at = datetime('now')
+       WHERE id = ? AND email = ? AND status = 'pending' AND expires_at > datetime('now') RETURNING *`,
+      [accept ? 'accepted' : 'declined', id, req.user.email]
+    );
+    if (!row) return null;
+    if (accept) {
+      await db.run(`INSERT INTO family_members (family_id, user_id, role) VALUES (?, ?, 'member') ON CONFLICT (family_id, user_id) DO NOTHING`, [row.family_id, req.user.id]);
+    }
+    return row;
+  });
+  if (!result) {
+    const err = new ValidationError(INVITE_GONE);
+    err.status = 404;
+    throw err;
+  }
+  const family = await db.get('SELECT * FROM families WHERE id = ?', [result.family_id]);
+  if (accept) {
+    await logActivity({ userId: req.user.id, familyId: family.id, type: 'member_joined', summary: `${req.user.first_name} joined ${family.name}` });
+    return res.json({ ok: true, family: mapFamily(family, await membersFor(family.id), req.user.id) });
+  }
+  res.json({ ok: true });
+}
+
+router.post('/invitations/:invId/accept', asyncRoute((req, res) => answerInvitation(req, res, true)));
+router.post('/invitations/:invId/decline', asyncRoute((req, res) => answerInvitation(req, res, false)));
+
+async function sendInvitationMail(to, inviterName, familyName) {
+  try {
+    const base = resetBaseUrl();
+    const text =
+      `${inviterName} invited you to the circle "${familyName}" on LifeAdmin.\n\n` +
+      `Open ${base || 'LifeAdmin'} and sign in (or create an account) with THIS email address, confirm it, and the invitation will be waiting for you. ` +
+      `It is valid for ${INVITE_DAYS} days.\n\nIf you do not know ${inviterName}, ignore this email: nothing happens.`;
+    await sendMail({ to, subject: 'You were invited to a circle on LifeAdmin', text });
+  } catch {}
+}
+
+router.post(
+  '/:id/invitations',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    await requireRole(req.user.id, familyId, ['owner', 'admin']);
+    requireVerifiedEmail(req.user);
+    const email = req.body && req.body.email;
+    if (!isEmail(email)) throw new ValidationError('Enter a valid email address.', { email: 'Enter a valid email address.' });
+    const norm = email.trim().toLowerCase();
+    const key = `invite|${req.user.id}`;
+    if (await limits.inviteEmail.consume(key)) return await tooMany(res, limits.inviteEmail, key);
+
+    const family = await db.get('SELECT * FROM families WHERE id = ?', [familyId]);
+    const target = await db.get('SELECT id FROM users WHERE email = ?', [norm]);
+    const alreadyIn = target ? await db.get('SELECT id FROM family_members WHERE family_id = ? AND user_id = ?', [familyId, target.id]) : null;
+    // Myself or somebody already inside: nothing happens, and the answer is the same as for anybody else.
+    if (norm !== req.user.email && !alreadyIn) {
+      await expireOld();
+      const created = await db.get(
+        `INSERT INTO circle_invitations (family_id, email, invited_by, expires_at) VALUES (?, ?, ?, datetime('now', '+${INVITE_DAYS} days'))
+         ON CONFLICT (family_id, email) WHERE status = 'pending' DO NOTHING RETURNING id`,
+        [familyId, norm, req.user.id]
+      );
+      // Only a NEW invitation is announced: asking again cannot be used to send the person more mail.
+      if (created) {
+        if (target) {
+          await notifyUser(target.id, { type: 'family', title: `${req.user.first_name} invited you to ${family.name}`, link: '#/family' });
+        }
+        await sendInvitationMail(norm, req.user.first_name, family.name);
+      }
+    }
+    res.status(202).json({ ok: true, message: INVITE_SENT_MESSAGE });
+  })
+);
+
+router.get(
+  '/:id/invitations',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    await requireRole(req.user.id, familyId, ['owner', 'admin']);
+    await expireOld();
+    const rows = await db.all(
+      `SELECT i.*, f.name AS family_name FROM circle_invitations i JOIN families f ON f.id = i.family_id
+       WHERE i.family_id = ? ORDER BY i.created_at DESC LIMIT 100`,
+      [familyId]
+    );
+    res.json({ invitations: rows.map(mapInvitation) });
+  })
+);
+
+router.delete(
+  '/:id/invitations/:invId',
+  asyncRoute(async (req, res) => {
+    const familyId = Number(req.params.id);
+    await requireRole(req.user.id, familyId, ['owner', 'admin']);
+    const row = await db.get(
+      `UPDATE circle_invitations SET status = 'revoked', responded_at = datetime('now') WHERE id = ? AND family_id = ? AND status = 'pending' RETURNING id`,
+      [Number(req.params.invId), familyId]
+    );
+    if (!row) return res.status(404).json({ error: 'No pending invitation found.' });
+    res.json({ ok: true });
   })
 );
 

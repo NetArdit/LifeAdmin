@@ -41,7 +41,7 @@
    offset never has to be hand-computed against a variable header
    height), then plain content flow — no fixed sidebar, so no
    margin-left offset hack on the content column either. */
-.shell { display: flex; flex-direction: column; min-height: 100vh; }
+.shell { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 
 .shell-top { position: sticky; top: 0; z-index: 60; background: var(--bg); border-bottom: 1px solid var(--surface-border); }
 
@@ -241,3 +241,6 @@
   .account-chip { padding: 0; width: 44px; height: 44px; justify-content: center; }
   .view-switch button { padding: 8px 10px; font-size: 12.5px; }
 }
+
+/* The on-screen keyboard is open (js/keyboard.js): the floating button would sit on top of the keys. */
+html.keyboard-open .fab { display: none; }

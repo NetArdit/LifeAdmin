@@ -12,7 +12,7 @@
 
 const db = require('../db');
 
-const NOT_BACKED_UP = ['sessions', 'push_subscriptions', 'otp_codes', 'password_reset_tokens', 'rate_limits', 'document_scans'];
+const NOT_BACKED_UP = ['sessions', 'push_subscriptions', 'otp_codes', 'password_reset_tokens', 'rate_limits', 'document_scans', 'email_verification_tokens', 'oauth_attempts'];
 const FORMAT = 2;
 
 async function tableNames() {
@@ -101,7 +101,8 @@ async function restoreBackup(input) {
       }
       counts[table] = rows.length;
       // New rows must continue after the highest id that came back.
-      const id = await db.get("SELECT pg_get_serial_sequence(?, 'id') AS seq", [table]).catch(() => null);
+      // Only a table that has an id column has a sequence to move (asking for one of a table without it is an error that would abort the whole transaction).
+      const id = shape[table] && shape[table].includes('id') ? await db.get("SELECT pg_get_serial_sequence(?, 'id') AS seq", [table]) : null;
       if (id && id.seq && rows.length) await db.get(`SELECT setval(?::regclass, (SELECT max(id) FROM ${table}))`, [id.seq]);
     }
   });

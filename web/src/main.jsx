@@ -11,6 +11,8 @@ import { Timeline } from './pages/Timeline.jsx';
 import { DecisionFlow } from './pages/DecisionFlow.jsx';
 import { Assistant } from './pages/Assistant.jsx';
 import { Settings } from './pages/Settings.jsx';
+import { Routines } from './pages/Routines.jsx';
+import { Reflection } from './pages/Reflection.jsx';
 // C3 Phase 1: the shell's quick-add FAB (public/js/app.js) reuses this
 // exact modal — the same one Tasks' own "New task" button opens — rather
 // than a second, parallel task-creation implementation. Re-exported here
@@ -93,6 +95,14 @@ export const unmountDecisionflow = decisionflowMount.unmount;
 const assistantMount = makePageMount(Assistant);
 export const mountAssistant = assistantMount.mount;
 export const unmountAssistant = assistantMount.unmount;
+
+const reflectionMount = makePageMount(Reflection);
+export const mountReflection = reflectionMount.mount;
+export const unmountReflection = reflectionMount.unmount;
+
+const routinesMount = makePageMount(Routines);
+export const mountRoutines = routinesMount.mount;
+export const unmountRoutines = routinesMount.unmount;
 
 const settingsMount = makePageMount(Settings);
 export const mountSettings = settingsMount.mount;

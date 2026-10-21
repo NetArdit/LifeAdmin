@@ -2,7 +2,8 @@ import { api, ApiError, setUnauthorizedHandler } from './api.js';
 import { icon } from './components/icons.js';
 import { toast, escapeHtml } from './components/toast.js';
 import { closeModal } from './components/modal.js';
-import { initials } from './format.js';
+import { initials, scrollIntoStrip } from './format.js';
+import { watchKeyboard } from './keyboard.js';
 import { applyTheme } from './theme.js';
 import * as push from './push.js';
 
@@ -56,6 +57,8 @@ const RAIL_ITEMS = [
   { key: 'family', label: 'Circle', icon: 'family' },
   { key: 'billsense', label: 'Bills', icon: 'bill' },
   { key: 'documents', label: 'Documents', icon: 'document' },
+  { key: 'routines', label: 'Routines', icon: 'clock' },
+  { key: 'reflection', label: 'Reflection', icon: 'sparkle' },
   { key: 'goals', label: 'Goals', icon: 'goal' },
   { key: 'decisionflow', label: 'Decisions', icon: 'decision' },
   { key: 'ecolife', label: 'EcoLife', icon: 'eco' },
@@ -71,6 +74,8 @@ const RAIL_LINK_PREFIX = {
   family: '#/family',
   billsense: '#/billsense',
   documents: '#/documents',
+  routines: '#/routines',
+  reflection: '#/reflection',
   goals: '#/goals',
   decisionflow: '#/decisionflow',
   ecolife: '#/ecolife',
@@ -82,6 +87,7 @@ const appEl = document.getElementById('app');
 // Boot
 // ---------------------------------------------------------------------
 async function boot() {
+  watchKeyboard();
   try {
     const cfg = await api.get('/api/config');
     state.aiConfigured = cfg.aiConfigured;
@@ -97,7 +103,9 @@ async function boot() {
   // A password-reset link (#/reset-password/<token>) is always handled by the
   // auth screen, even if a session cookie happens to exist — completing a
   // reset signs every session out anyway.
-  const isResetLink = /^#\/reset-password\//.test(location.hash);
+  // The same goes for an email-confirmation link (#/verify-email/<token>): it answers on the auth screen
+  // whether or not this browser is signed in.
+  const isResetLink = /^#\/(reset-password|verify-email)\//.test(location.hash);
 
   if (state.user && !isResetLink) {
     applyTheme(state.user.theme);
@@ -311,6 +319,9 @@ function renderModuleRail() {
     (item) => `<a class="rail-item ${current === item.key ? 'active' : ''}" href="#/${item.key}" id="rail-${item.key}">${icon(item.icon, 'icon icon-sm')}<span>${escapeHtml(item.label)}</span></a>`
   ).join('');
   updateRailBadges();
+  // The rail is rebuilt on every route: put the strip back where the current item is visible.
+  const strip = document.getElementById('module-rail');
+  scrollIntoStrip(strip, strip.querySelector('.rail-item.active'));
 }
 
 function unreadCountsByModule() {
@@ -461,6 +472,8 @@ const PAGES = {
   family: () => import('/app/main.js').then((m) => ({ mount: m.mountFamily, unmount: m.unmountFamily })),
   billsense: () => import('/app/main.js').then((m) => ({ mount: m.mountBillsense, unmount: m.unmountBillsense })),
   documents: () => import('/app/main.js').then((m) => ({ mount: m.mountDocuments, unmount: m.unmountDocuments })),
+  routines: () => import('/app/main.js').then((m) => ({ mount: m.mountRoutines, unmount: m.unmountRoutines })),
+  reflection: () => import('/app/main.js').then((m) => ({ mount: m.mountReflection, unmount: m.unmountReflection })),
   goals: () => import('/app/main.js').then((m) => ({ mount: m.mountGoals, unmount: m.unmountGoals })),
   ecolife: () => import('/app/main.js').then((m) => ({ mount: m.mountEcolife, unmount: m.unmountEcolife })),
   timeline: () => import('/app/main.js').then((m) => ({ mount: m.mountTimeline, unmount: m.unmountTimeline })),

@@ -229,7 +229,8 @@ test('push: a server without keys says so and takes no subscription', async (t) 
 
   await t.test('a request that says it comes from another site is refused, on every route that changes something', async () => {
     const user = uniqueUser();
-    const signup = await fetch(`${app.base}/api/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(user) });
+    await fetch(`${app.base}/api/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(user) });
+    const signup = await fetch(`${app.base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: user.email, password: user.password }) });
     const cookie = signup.headers.get('set-cookie').split(';')[0];
     const call = (method, url, headers, body) => fetch(app.base + url, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
     const task = { title: 'From elsewhere' };

@@ -69,7 +69,7 @@ async function isNotifTypeEnabled(userId, type) {
 }
 
 // Which fixed sentence a device shows for each kind of notification.
-const PUSH_KIND = { chat: 'chat', comment: 'comment', family: 'task', reminder: 'reminder' };
+const PUSH_KIND = { chat: 'chat', comment: 'comment', family: 'task', reminder: 'reminder', goal: 'goal' };
 
 /** Why a push that is owed is not sent after all, or null when it is to be sent. */
 async function reasonNotToSend(row) {
@@ -102,7 +102,7 @@ async function deliverPush(id) {
   const row = await db.get(
     `UPDATE notifications SET push_attempts = push_attempts + 1, push_retry_at = datetime('now', '+2 minutes'), push_claim = ?
      WHERE id = ? AND push_status = 'pending' AND (push_retry_at IS NULL OR push_retry_at <= datetime('now'))
-     RETURNING id, user_id, type, link, family_id, push_kind, push_attempts`,
+     RETURNING id, user_id, type, link, family_id, push_kind, push_text, push_attempts`,
     [claim, id]
   );
   if (!row) return null;
@@ -122,9 +122,13 @@ async function deliverPush(id) {
 async function attempt(row, close) {
   let status = await reasonNotToSend(row);
   if (!status) {
+    // The lock screen says one fixed sentence. Only a person who turned on richer text (notif_prefs.richPush,
+    // checked now, not when the row was made) gets the short line stored with the row.
+    const owner = row.push_text ? await db.get('SELECT notif_prefs FROM users WHERE id = ?', [row.user_id]) : null;
+    const rich = owner && safeJson(owner.notif_prefs, {}).richPush === true ? row.push_text : null;
     const counts = await push.sendToUser(
       row.user_id,
-      { kind: row.push_kind || PUSH_KIND[row.type] || 'update', path: row.link ? `/${row.link}` : '/', tag: `n-${row.id}` },
+      { kind: row.push_kind || PUSH_KIND[row.type] || 'update', path: row.link ? `/${row.link}` : '/', tag: `n-${row.id}`, text: rich },
       { urgency: row.type === 'chat' || row.type === 'comment' ? 'high' : 'normal' }
     );
     if (counts.sent) status = 'sent';
@@ -141,10 +145,10 @@ async function attempt(row, close) {
  * Tells one person. `familyId` says the event belongs to a circle (so that a muted circle and the night stay
  * quiet); `pushKind` overrides the sentence a device shows (the reminder worker says 'reminder').
  */
-async function notifyUser(userId, { type, title, body = null, link = null, familyId = null, pushKind = null }) {
+async function notifyUser(userId, { type, title, body = null, link = null, familyId = null, pushKind = null, pushText = null, templateKey = null }) {
   if (!await isNotifTypeEnabled(userId, type)) return;
   const owed = push.config().configured ? 'pending' : null;
-  const row = await db.run('INSERT INTO notifications (user_id, type, title, body, link, family_id, push_kind, push_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+  const row = await db.run('INSERT INTO notifications (user_id, type, title, body, link, family_id, push_kind, push_status, push_text, template_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
     userId,
     type,
     title,
@@ -153,6 +157,8 @@ async function notifyUser(userId, { type, title, body = null, link = null, famil
     familyId,
     pushKind,
     owed,
+    pushText,
+    templateKey,
   ]);
   // The device is told after the event is stored for good, and outside its transaction. If this never
   // runs or fails, the row still says 'pending' and the clock takes it up.

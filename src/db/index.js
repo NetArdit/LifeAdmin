@@ -136,6 +136,11 @@ async function open() {
     await backend.exec('ALTER TABLE decision_options ADD COLUMN IF NOT EXISTS risks TEXT');
     await backend.exec(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT;
+      -- Opt-in, off by default: may Reflection be given a summary of the person's own data? (Rollback: drop both columns.)
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_insights_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_insights_at TEXT;
+      -- The phone number is optional. (Rollback, only while no row has NULL: ALTER TABLE users ALTER COLUMN phone SET NOT NULL.)
+      ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_prefs TEXT NOT NULL DEFAULT '{}';
       ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'default';
       ALTER TABLE bills ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'default';
@@ -152,6 +157,9 @@ async function open() {
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_attempts INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_retry_at TEXT;
       ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_claim TEXT;
+      -- A goal reminder: the line that was chosen (so it is not repeated), and the text a device may show ONLY if its owner turned on richer lock-screen text.
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS template_key TEXT;
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_text TEXT;
       -- Only now do these columns exist in a database made by an earlier version.
       CREATE INDEX IF NOT EXISTS idx_notif_push_owed ON notifications(id) WHERE push_status = 'pending';
       ALTER TABLE planned_reminders ADD COLUMN IF NOT EXISTS claim_token TEXT;

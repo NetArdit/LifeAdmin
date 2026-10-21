@@ -291,6 +291,7 @@ async function wantedFor(sourceType, sourceId, { lock = false } = {}) {
   if (sourceType === 'task') return wantedForTask(await db.get(`SELECT * FROM tasks WHERE id = ?${hold}`, [sourceId]));
   if (sourceType === 'bill') return wantedForBill(await db.get(`SELECT * FROM bills WHERE id = ?${hold}`, [sourceId]));
   if (sourceType === 'document') return wantedForDocument(await db.get(`SELECT * FROM documents WHERE id = ?${hold}`, [sourceId]));
+  if (sourceType === 'routine') return wantedForRoutine(await db.get(`SELECT * FROM routines WHERE id = ?${hold}`, [sourceId]));
   let goalId = sourceId;
   if (sourceType === 'milestone') {
     const step = await db.get('SELECT goal_id FROM goal_milestones WHERE id = ?', [sourceId]);
@@ -302,6 +303,71 @@ async function wantedFor(sourceType, sourceId, { lock = false } = {}) {
   const goal = await db.get(`SELECT * FROM goals WHERE id = ?${hold}`, [goalId]);
   if (!goal) return [];
   return wantedForGoal(goal, await db.all('SELECT * FROM goal_milestones WHERE goal_id = ? ORDER BY id', [goal.id]));
+}
+
+// ---- routines: things that come back every day or on chosen days ------------------------------------------
+// A routine is a wall-clock time ("07:30") and a rule (every day, or these weekdays). What the person means by
+// 07:30 is decided in the routine's time zone: the person's own (it follows them when they change it) or a
+// fixed one. Only a short window of occurrences is planned (a day back, two days ahead) and the clock
+// extends it every run, so there is never a pile of future rows to repair when a routine is edited.
+
+const ROUTINE_BACK_HOURS = 24;
+const ROUTINE_AHEAD_DAYS = 2;
+const dayOfWeek = (date) => new Date(`${date}T00:00:00Z`).getUTCDay();
+
+function routineDays(routine) {
+  let days = [];
+  try {
+    days = JSON.parse(routine.days_of_week || '[]');
+  } catch {}
+  return Array.isArray(days) ? [...new Set(days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))] : [];
+}
+
+function routineZone(routine, user) {
+  if (routine.follow_profile_zone) return zoneOf(user);
+  return isZone(routine.timezone) ? routine.timezone : zoneOf(user);
+}
+
+/**
+ * The occurrences of a routine whose moment lies between `now - backHours` and `ahead` local days after
+ * today, in order: { date, at } with `date` the local day and `at` the moment in ms. A weekday that is not in
+ * the rule has none. On the night the clocks go forward a time that does not exist happens at the later
+ * moment; on the night they go back, the later of the two (wallToUtc), and the day has one occurrence only.
+ */
+function routineOccurrences(routine, zone, now, { backHours = ROUTINE_BACK_HOURS, ahead = ROUTINE_AHEAD_DAYS } = {}) {
+  const out = [];
+  const wanted = routineDays(routine);
+  const today = wallAt(now, zone).date;
+  for (let i = -Math.ceil(backHours / 24) - 1; i <= ahead; i++) {
+    const date = addDays(today, i);
+    if (wanted.length && !wanted.includes(dayOfWeek(date))) continue;
+    const at = wallToUtc(date, routine.time_of_day, zone);
+    if (at > now - backHours * 3600000) out.push({ date, at });
+  }
+  return out;
+}
+
+async function wantedForRoutine(routine, now = Date.now()) {
+  if (!routine || !routine.enabled) return [];
+  const user = await userRow(routine.owner_id);
+  if (!user) return [];
+  const zone = routineZone(routine, user);
+  return routineOccurrences(routine, zone, now).map((o) => ({
+    userId: user.id,
+    sourceType: 'routine',
+    sourceId: routine.id,
+    occurrenceKey: o.date,
+    ruleKey: `at:${routine.time_of_day}`,
+    scheduledAt: iso(o.at),
+    timezone: zone,
+  }));
+}
+
+/** The next moment (ms) a routine is due after `now`, or null when it is paused or has no day. */
+function nextRoutineMoment(routine, zone, now = Date.now()) {
+  if (!routine.enabled) return null;
+  const next = routineOccurrences(routine, zone, now, { backHours: 0, ahead: 8 })[0];
+  return next ? next.at : null;
 }
 
 // ---- making the table agree -----------------------------------------------------------------------------
@@ -371,6 +437,22 @@ async function replanBill(billId, now) {
   });
 }
 
+/** A routine was created, edited, paused, resumed or deleted: its pending rows follow, stale ones are cancelled. */
+async function replanRoutine(routineId, now) {
+  await db.tx(async () => {
+    const routine = await db.get('SELECT * FROM routines WHERE id = ? FOR UPDATE', [routineId]);
+    if (!routine) return forget('routine', routineId);
+    await reconcile([{ type: 'routine', id: routine.id }], await wantedForRoutine(routine, now), now);
+  });
+}
+
+/** The clock's part: every enabled routine gets its window of occurrences moved forward. Answers a count. */
+async function replanAllRoutines(now) {
+  const rows = await db.all('SELECT id FROM routines WHERE enabled = 1 ORDER BY id LIMIT 2000');
+  for (const { id } of rows) await replanRoutine(id, now);
+  return rows.length;
+}
+
 async function replanDocument(documentId, now) {
   await db.tx(async () => {
     const doc = await db.get('SELECT * FROM documents WHERE id = ? FOR UPDATE', [documentId]);
@@ -409,6 +491,7 @@ async function replanUser(userId, now) {
     for (const b of await db.all("SELECT id FROM bills WHERE owner_id = ? AND status = 'unpaid' ORDER BY id", [userId])) await replanBill(b.id, now);
     for (const g of await db.all("SELECT id FROM goals WHERE owner_id = ? AND status = 'active' ORDER BY id", [userId])) await replanGoal(g.id, now);
     for (const d of await db.all("SELECT id FROM documents WHERE owner_id = ? AND status = 'active' ORDER BY id", [userId])) await replanDocument(d.id, now);
+    for (const r of await db.all('SELECT id FROM routines WHERE owner_id = ? AND enabled = 1 ORDER BY id', [userId])) await replanRoutine(r.id, now);
   });
 }
 
@@ -424,7 +507,7 @@ async function forgetLostMilestones(userId) {
 
 // Rows of one person whose item no longer exists, whatever removed it (the demo data is deleted in bulk).
 async function forgetLost(userId) {
-  for (const [type, table] of [['task', 'tasks'], ['bill', 'bills'], ['goal', 'goals'], ['document', 'documents']]) {
+  for (const [type, table] of [['task', 'tasks'], ['bill', 'bills'], ['goal', 'goals'], ['document', 'documents'], ['routine', 'routines']]) {
     await db.run(`DELETE FROM planned_reminders WHERE user_id = ? AND source_type = ? AND source_id NOT IN (SELECT id FROM ${table})`, [userId, type]);
   }
   await forgetLostMilestones(userId);
@@ -455,6 +538,12 @@ module.exports = {
   replanBill,
   replanGoal,
   replanDocument,
+  replanRoutine,
+  replanAllRoutines,
+  routineOccurrences,
+  routineZone,
+  routineDays,
+  nextRoutineMoment,
   DOCUMENT_REMINDER_DAYS,
   replanUser,
   forget,

@@ -150,7 +150,9 @@ test('settings', async (t) => {
     // via a fresh account with the same email now being allowed (proves the row is gone).
     const reSignup = makeClient(app.base);
     const res = await reSignup.post('/api/auth/signup', { ...payload });
-    assert.equal(res.status, 201, 'the email should be free again once the account and its data are truly deleted');
+    assert.equal(res.status, 202);
+    const login = await reSignup.post('/api/auth/login', { identifier: payload.email, password: payload.password });
+    assert.equal(login.status, 200, 'the email should be free again once the account and its data are truly deleted');
   });
 
   await t.test('the account-deletion endpoint requires authentication', async () => {

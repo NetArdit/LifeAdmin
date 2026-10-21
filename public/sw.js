@@ -8,6 +8,7 @@
 const TEXT = {
   update: 'You have something new.',
   reminder: 'A reminder is due.',
+  goal: 'Time for a small step toward your goal.',
   chat: 'New message in your circle.',
   comment: 'New comment on a task.',
   task: 'New task in your circle.',
@@ -27,7 +28,9 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {}
-  const options = { body: TEXT[data.k] || TEXT.update, icon: '/icons/icon-192.png', badge: '/icons/badge-96.png', data: { path: safePath(data.u) } };
+  // `m` is a short line of ours that only comes when the person turned on richer text: never their own words.
+  const rich = typeof data.m === 'string' && data.m.length <= 120 ? data.m : null;
+  const options = { body: rich || TEXT[data.k] || TEXT.update, icon: '/icons/icon-192.png', badge: '/icons/badge-96.png', data: { path: safePath(data.u) } };
   if (typeof data.g === 'string' && data.g) options.tag = data.g;
   // A notification is always shown for a push: browsers take the permission away from sites that stay silent.
   event.waitUntil(self.registration.showNotification('LifeAdmin', options));

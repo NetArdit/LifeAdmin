@@ -34,3 +34,4 @@ backups/
 
 # The PDF library, copied from its package by the web build (npm run build:web)
 public/vendor/
+.scratch/

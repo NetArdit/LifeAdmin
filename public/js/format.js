@@ -77,3 +77,14 @@ export function daysUntilLabel(days) {
   if (days === 1) return 'Due tomorrow';
   return `Due in ${days}d`;
 }
+
+// Brings the chosen item of a horizontally scrolling strip (tab row, module rail) into view by moving the
+// STRIP only: scrollIntoView() would also move the page. The item is centred when it does not fit.
+export function scrollIntoStrip(strip, item) {
+  if (!strip || !item) return;
+  const left = item.offsetLeft - strip.offsetLeft;
+  const target = left - (strip.clientWidth - item.offsetWidth) / 2;
+  const max = strip.scrollWidth - strip.clientWidth;
+  if (max <= 0) return;
+  strip.scrollLeft = Math.max(0, Math.min(max, target));
+}

@@ -5,11 +5,33 @@ import { api, ApiError } from '../api.js';
 // 'reset' — using the same markup/classes as login and signup.
 const RESET_HASH = /^#\/reset-password\/([A-Za-z0-9_-]+)/;
 
-export function mount(root, onAuthed) {
+// The link in the email-confirmation message. Like the reset token it lives in the fragment, which is never sent anywhere.
+const VERIFY_HASH = /^#\/verify-email\/([A-Za-z0-9_-]+)/;
+
+// Why a Google sign-in came back without a session (the server sends a short code only).
+const AUTH_ERRORS = {
+  google_unavailable: 'Google sign-in is not available right now. Use your email and password.',
+  google_cancelled: 'Google sign-in was cancelled.',
+  google_failed: 'Google sign-in did not work. Please try again.',
+  google_unverified: 'Google has not confirmed that email address, so it cannot be used here.',
+  google_link_needs_signin: 'An account with this email already exists and its email is not confirmed yet. Sign in with your password first, confirm your email in Settings, then use Google.',
+};
+
+export async function mount(root, onAuthed) {
   const initialToken = (RESET_HASH.exec(location.hash) || [])[1] || null;
+  const verifyToken = (VERIFY_HASH.exec(location.hash) || [])[1] || null;
   let resetToken = initialToken;
-  let mode = initialToken ? 'reset' : 'login';
+  let mode = verifyToken ? 'verify' : initialToken ? 'reset' : 'login';
   let notice = '';
+  let googleOn = false;
+  try {
+    googleOn = !!(await api.get('/api/config')).googleConfigured;
+  } catch {}
+  const authError = new URLSearchParams(location.search).get('auth_error');
+  if (authError) {
+    notice = AUTH_ERRORS[authError] || AUTH_ERRORS.google_failed;
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
   render();
 
   function render() {
@@ -36,6 +58,7 @@ export function mount(root, onAuthed) {
   function renderForm() {
     const container = document.getElementById('auth-form-container');
     if (mode === 'reset') return renderReset(container);
+    if (mode === 'verify') return renderVerify(container);
     container.innerHTML = mode === 'login' ? loginHtml() : mode === 'forgot' ? forgotHtml() : signupHtml();
     wireForm();
   }
@@ -57,6 +80,7 @@ export function mount(root, onAuthed) {
         <div id="form-error" class="field-error" role="alert" style="display:none"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Sign in</button>
       </form>
+      ${googleButton()}
       <p class="auth-switch"><button type="button" id="forgot-link">Forgot your password?</button></p>
       <p class="auth-switch">New to LifeAdmin? <button type="button" id="switch-mode">Create an account</button></p>
     `;
@@ -72,14 +96,22 @@ export function mount(root, onAuthed) {
           ${field('lastName', 'Last name', 'text')}
         </div>
         ${field('email', 'Email', 'email')}
-        ${field('phone', 'Phone number', 'tel', '', '+383 44 123 456')}
+        ${field('phone', 'Phone number (optional)', 'tel', '', '+383 44 123 456')}
         ${field('password', 'Password', 'password', '', 'At least 8 characters')}
         ${field('confirmPassword', 'Confirm password', 'password')}
         <div id="form-error" class="field-error" role="alert" style="display:none"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="submit-btn">Create account</button>
       </form>
+      ${googleButton()}
       <p class="auth-switch">Already have an account? <button type="button" id="switch-mode">Sign in</button></p>
     `;
+  }
+
+  // A plain link: the browser leaves for Google and comes back to the server's callback, which sets the session.
+  function googleButton() {
+    if (!googleOn) return '';
+    return `<p class="muted text-sm" style="text-align:center;margin:var(--sp-4) 0 var(--sp-2)">or</p>
+      <a class="btn btn-block btn-lg" id="google-btn" href="/api/auth/google/start">Continue with Google</a>`;
   }
 
   function forgotHtml() {
@@ -137,6 +169,31 @@ export function mount(root, onAuthed) {
     `;
     document.getElementById('back-login').addEventListener('click', () => leaveReset('login'));
     wireForm();
+  }
+
+  // ---- email confirmation (arrived via the emailed link) ---------------------
+  async function renderVerify(container) {
+    container.innerHTML = `<div class="loading-line" role="status"><span class="spinner"></span> Confirming your email…</div>`;
+    let title = 'Email confirmed';
+    let text = 'Thank you. Your email address is confirmed.';
+    let failed = false;
+    try {
+      await api.post('/api/auth/verify-email', { token: verifyToken });
+    } catch (err) {
+      failed = true;
+      title = "This link can't be used";
+      text = err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
+    }
+    container.innerHTML = `
+      <h2 style="font-family:var(--font-serif);font-weight:500;font-size:1.7rem;margin-bottom:4px">${escapeText(title)}</h2>
+      <p class="text-sm" role="${failed ? 'alert' : 'status'}" style="margin:var(--sp-4) 0 var(--sp-6)">${escapeText(text)}</p>
+      <button type="button" class="btn btn-primary btn-block btn-lg" id="verify-continue">Continue</button>
+    `;
+    document.getElementById('verify-continue').addEventListener('click', () => {
+      // The token must not stay in the address bar or the history.
+      history.replaceState(null, '', location.pathname + location.search);
+      location.reload();
+    });
   }
 
   function leaveReset(nextMode) {
@@ -202,10 +259,15 @@ export function mount(root, onAuthed) {
           leaveReset('login');
           return;
         }
-        const result =
-          mode === 'login'
-            ? await api.post('/api/auth/login', data)
-            : await api.post('/api/auth/signup', data);
+        if (mode === 'signup') {
+          // The answer is the same whether or not the address already had an account, and starts no session.
+          const result = await api.post('/api/auth/signup', data);
+          notice = result.message + ' You can sign in now.';
+          mode = 'login';
+          renderForm();
+          return;
+        }
+        const result = await api.post('/api/auth/login', data);
         onAuthed(result.user);
       } catch (err) {
         if (err instanceof ApiError) {

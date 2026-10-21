@@ -144,10 +144,13 @@ function safePath(path) {
  * What goes to the device. `kind` chooses one of a few fixed sentences; nothing of the person's own words.
  * `tag` names the event, so that the same event shown twice replaces itself.
  */
-function payloadOf({ kind = 'update', path = '/', tag = null } = {}) {
-  const KINDS = ['update', 'reminder', 'chat', 'comment', 'task', 'test'];
+function payloadOf({ kind = 'update', path = '/', tag = null, text = null } = {}) {
+  const KINDS = ['update', 'reminder', 'goal', 'chat', 'comment', 'task', 'test'];
   // A tag is a word and a number ("chat-812"), made by the code that sends: never a person's text.
-  return JSON.stringify({ k: KINDS.includes(kind) ? kind : 'update', u: safePath(path), g: typeof tag === 'string' && /^[a-z]{1,16}(-[0-9]{1,18})?$/.test(tag) ? tag : null });
+  const out = { k: KINDS.includes(kind) ? kind : 'update', u: safePath(path), g: typeof tag === 'string' && /^[a-z]{1,16}(-[0-9]{1,18})?$/.test(tag) ? tag : null };
+  // The richer sentence exists only when the person turned it on (notify.js decides); it is one of our own lines, short and plain.
+  if (typeof text === 'string' && /^[\p{L}\p{N} .,!?'%:-]{1,120}$/u.test(text)) out.m = text;
+  return JSON.stringify(out);
 }
 
 async function sendToRow(row, payload, { ttl = 3600, urgency = 'normal' } = {}) {

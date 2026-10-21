@@ -1,7 +1,7 @@
 import { Icon } from '../Icon.jsx';
 
 // Direct port of noFamilyHtml() from the original public/js/pages/family.js.
-export function NoFamilyState({ onCreate, onJoin }) {
+export function NoFamilyState({ onCreate, onJoin, extra = null }) {
   return (
     <div className="page">
       <div className="page-header">
@@ -10,6 +10,7 @@ export function NoFamilyState({ onCreate, onJoin }) {
           <p className="page-subtitle">Shared responsibilities, chat, and activity.</p>
         </div>
       </div>
+      {extra}
       <div className="card">
         <div className="empty-state">
           <Icon name="family" cls="icon-lg" />

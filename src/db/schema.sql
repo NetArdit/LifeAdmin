@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
-  phone TEXT NOT NULL UNIQUE,
+  phone TEXT UNIQUE, -- optional (NULL: none given); a database made earlier is relaxed in src/db/index.js
   password_hash TEXT NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,
   phone_verified INTEGER NOT NULL DEFAULT 0,
@@ -295,7 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_shopping_family ON shopping_items(family_id);
 CREATE TABLE IF NOT EXISTS planned_reminders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  source_type TEXT NOT NULL, -- task | bill | goal | milestone | document
+  source_type TEXT NOT NULL, -- task | bill | goal | milestone | document | routine
   source_id INTEGER NOT NULL,
   occurrence_key TEXT NOT NULL, -- the due date or moment this reminder is for
   rule_key TEXT NOT NULL, -- 'before:60'
@@ -400,3 +400,120 @@ CREATE TABLE IF NOT EXISTS document_scans (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_document_scans_user ON document_scans(user_id);
+
+-- Email-ownership links. Only a SHA-256 hash of the token is stored. The token is bound to the address it was
+-- sent to: if the account's email changes afterwards, the link no longer proves anything. expires_at and
+-- used_at are epoch milliseconds.
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_verif_user ON email_verification_tokens(user_id);
+
+-- A Google identity linked to an account. google_sub is Google's stable id of the person (never the email).
+CREATE TABLE IF NOT EXISTS google_identities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  google_sub TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_google_user ON google_identities(user_id);
+
+-- One row per started Google sign-in: the state and the PKCE verifier it must come back with. Single use.
+CREATE TABLE IF NOT EXISTS oauth_attempts (
+  state_hash TEXT PRIMARY KEY,
+  code_verifier TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+-- Invitations to a circle by the email of an account (the invitation code keeps working as before).
+-- Acceptance is bound to the VERIFIED email of whoever accepts. One pending invitation per circle and email.
+CREATE TABLE IF NOT EXISTS circle_invitations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+  email TEXT NOT NULL, -- lower case
+  invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | declined | expired | revoked
+  expires_at TEXT NOT NULL,
+  responded_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (status IN ('pending', 'accepted', 'declined', 'expired', 'revoked'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_circle_invitations_pending ON circle_invitations(family_id, email) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_circle_invitations_email ON circle_invitations(email, status);
+
+-- Recurring routines (exercise, meditation, a medicine the person names themselves). The time is the local
+-- wall-clock time, with the recurrence rule; the moments are worked out on the server in the routine's zone
+-- (reminders.js). days_of_week is a JSON list of 0 (Sunday) .. 6; an empty list means every day.
+-- follow_profile_zone: the routine goes with the person's own time zone (a trip, a move); otherwise `timezone` is fixed.
+CREATE TABLE IF NOT EXISTS routines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  details TEXT,
+  kind TEXT NOT NULL DEFAULT 'other', -- exercise | meditation | medication | other
+  time_of_day TEXT NOT NULL, -- 'HH:MM', local
+  days_of_week TEXT NOT NULL DEFAULT '[]',
+  timezone TEXT NOT NULL,
+  follow_profile_zone INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (kind IN ('exercise', 'meditation', 'medication', 'other'))
+);
+CREATE INDEX IF NOT EXISTS idx_routines_owner ON routines(owner_id);
+
+-- "I did it": written only by the person (never by a reminder). One per routine and local day.
+CREATE TABLE IF NOT EXISTS routine_checkins (
+  routine_id INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+  occurrence_date TEXT NOT NULL, -- the local day, YYYY-MM-DD
+  confirmed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (routine_id, occurrence_date)
+);
+
+-- Reflection: a private conversation with the AI. Owner-only; a person can delete one with everything in it.
+-- No message text is ever written to a log. A proposal is what the AI SUGGESTED to create; nothing exists
+-- until the person accepts it (status 'accepted', and then the record it made is named here). The
+-- idempotency_key is unique: one proposal can create one record, however many times Accept is pressed.
+CREATE TABLE IF NOT EXISTS reflection_conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_conv_user ON reflection_conversations(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS reflection_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id INTEGER NOT NULL REFERENCES reflection_conversations(id) ON DELETE CASCADE,
+  role TEXT NOT NULL, -- user | assistant
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_msg_conv ON reflection_messages(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS reflection_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conversation_id INTEGER NOT NULL REFERENCES reflection_conversations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, -- task | goal | routine
+  payload TEXT NOT NULL, -- JSON, validated by the server before it is stored
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected | superseded
+  created_type TEXT,
+  created_id INTEGER,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  decided_at TEXT,
+  CHECK (kind IN ('task', 'goal', 'routine')),
+  CHECK (status IN ('pending', 'accepted', 'rejected', 'superseded'))
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_prop_conv ON reflection_proposals(conversation_id, id);

@@ -2,6 +2,8 @@ import { Icon } from '../Icon.jsx';
 import { initials } from '../../../../public/js/format.js';
 import { confirmDialog } from '../../../../public/js/components/confirm.js';
 import { openAddMemberModal } from './AddMemberModal.jsx';
+import { SentInvitations } from './Invitations.jsx';
+import { useState } from 'react';
 
 // Direct port of renderMembers()/memberCard() from the original
 // public/js/pages/family.js. `canManage` is a UI convenience only — it
@@ -18,6 +20,7 @@ import { openAddMemberModal } from './AddMemberModal.jsx';
 export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) {
   const canManage = myRole === 'owner' || myRole === 'admin';
   const isOwner = myRole === 'owner';
+  const [sentKey, setSentKey] = useState(0);
   const hasOtherRegistered = family.members.some((m) => m.registered && m.role !== 'owner');
 
   async function handleRemove(memberId) {
@@ -80,9 +83,9 @@ export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) 
         {canManage ? (
           <button
             className="btn btn-sm btn-primary"
-            onClick={() => openAddMemberModal({ api, toast, familyId, onAdded: onChanged })}
+            onClick={() => openAddMemberModal({ api, toast, familyId, onAdded: () => { setSentKey((k) => k + 1); onChanged(); } })}
           >
-            <Icon name="plus" cls="icon-sm" /> Add by phone
+            <Icon name="plus" cls="icon-sm" /> Invite
           </button>
         ) : null}
       </div>
@@ -98,6 +101,7 @@ export function MembersTab({ api, toast, familyId, family, myRole, onChanged }) 
           />
         ))}
       </div>
+      {canManage ? <SentInvitations api={api} toast={toast} familyId={familyId} refreshKey={sentKey} /> : null}
       {isOwner ? (
         <p className="text-xs muted member-lifecycle-note">
           {hasOtherRegistered

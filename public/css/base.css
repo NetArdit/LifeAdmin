@@ -2,6 +2,9 @@
 html, body { height: 100%; }
 body {
   margin: 0;
+  /* A long unbroken word (a name, an address, an amount) may break anywhere instead of pushing the page wider
+     than the screen. Inherited by all text; "anywhere" (not "break-word") also lets flex/grid items shrink. */
+  overflow-wrap: anywhere;
   font-family: var(--font-sans);
   font-size: var(--fs-base);
   color: var(--text-primary);
@@ -62,4 +65,15 @@ img, svg { display: block; max-width: 100%; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+/* ---------- Phones: no zoom on focus, comfortable touch targets, stable height ----------
+   iOS Safari zooms the whole page when an editable control's computed font-size is under 16px (the app's
+   text is 15px, and every field inherits it). Pinch-zoom itself stays on: the viewport meta is untouched.
+   !important because the field classes (.input, .textarea, .select, .command-input ...) set their own size. */
+@media (pointer: coarse), (hover: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"]) { font-size: max(16px, 1em) !important; }
 }

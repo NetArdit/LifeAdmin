@@ -20,10 +20,11 @@ app.use(attachUser);
 app.use('/api', sameOrigin);
 
 // --- Public routes ---------------------------------------------------------
+app.use('/api/auth/google', require('./src/routes/google'));
 app.use('/api/auth', require('./src/routes/auth'));
 
 app.get('/api/config', (req, res) => {
-  res.json({ aiConfigured: ai.isConfigured() });
+  res.json({ aiConfigured: ai.isConfigured(), googleConfigured: require('./src/routes/google').isConfigured() });
 });
 
 // --- Protected API routes ---------------------------------------------------
@@ -37,6 +38,8 @@ app.use('/api/decisions', requireAuth, require('./src/routes/decisions'));
 app.use('/api/ecolife', requireAuth, require('./src/routes/ecolife'));
 app.use('/api/goals', requireAuth, require('./src/routes/goals'));
 app.use('/api/documents', requireAuth, require('./src/routes/documents'));
+app.use('/api/routines', requireAuth, require('./src/routes/routines'));
+app.use('/api/reflection', requireAuth, require('./src/routes/reflection'));
 app.use('/api/timeline', requireAuth, require('./src/routes/timeline'));
 app.use('/api/search', requireAuth, require('./src/routes/search'));
 app.use('/api/ai', requireAuth, require('./src/routes/ai'));

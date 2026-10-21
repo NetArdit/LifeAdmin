@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { scrollIntoStrip } from '../../../public/js/format.js';
 import { Icon } from '../components/Icon.jsx';
 import { ChatTab } from '../components/assistant/ChatTab.jsx';
 import { PlanTab } from '../components/assistant/PlanTab.jsx';
@@ -34,6 +35,12 @@ export function Assistant({ ctx }) {
     savedActiveTab = key;
     setActiveTabState(key);
   }
+
+  // The chosen view is brought into view inside the strip, on load and whenever it changes.
+  useEffect(() => {
+    const tab = document.getElementById(`assistant-tab-${activeTab}`);
+    scrollIntoStrip(tab && tab.parentElement, tab);
+  }, [activeTab]);
 
   function handleTabKeyDown(e) {
     const idx = TABS.findIndex(([key]) => key === activeTab);

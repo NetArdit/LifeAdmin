@@ -172,6 +172,7 @@ test('email provider (Resend adapter) and delivery-failure behaviour', async (t)
   await t.test('forgot password via the adapter: generic response, email built from APP_BASE_URL, reset works end to end', async () => {
     configure(); mode = 'ok'; calls.length = 0;
     const u = await userWithEmail();
+    calls.length = 0; // signup itself sent a confirmation link through the same provider
     const anon = makeClient(app.base);
     const res = await anon.post('/api/auth/forgot-password', { email: u.payload.email });
     assert.equal(res.status, 200);

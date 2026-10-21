@@ -19,6 +19,7 @@ const nodeGlobals = {
   clearInterval: 'readonly',
   fetch: 'readonly',
   AbortController: 'readonly',
+  AbortSignal: 'readonly',
   Response: 'readonly',
   Buffer: 'readonly',
   URL: 'readonly',
@@ -27,6 +28,7 @@ const nodeGlobals = {
 
 const browserGlobals = {
   window: 'readonly',
+  HTMLElement: 'readonly',
   document: 'readonly',
   localStorage: 'readonly',
   sessionStorage: 'readonly',
@@ -56,6 +58,9 @@ module.exports = [
     ignores: [
       '**/node_modules/**',
       'data/**',
+      '.scratch/**',
+      // Browser emulation scripts: most of their code runs inside the page (page.evaluate), not in Node.
+      'e2e/**',
       // Final-audit evidence scripts (throwaway probes, not product source).
       'audit-evidence/**',
       'hardening1-evidence/**',

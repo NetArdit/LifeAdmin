@@ -121,6 +121,9 @@ export function DeviceNotifications({ ctx }) {
           Turn on notifications
         </button>
       )}
+      <p className="text-xs muted" style={{ marginTop: 'var(--sp-3)' }}>
+        Without notifications nothing is lost: every reminder is also kept in the bell inside the app, and Routines shows what was missed, for when you open LifeAdmin. A phone that is off, offline or in battery-saver mode may receive a notification late or not at all; on an iPhone this only works for the app added to the Home Screen.
+      </p>
       {others > 0 && (
         <p className="text-sm muted" style={{ marginTop: 'var(--sp-3)' }}>
           {on ? 'Also on' : 'On for'} {others} other device{others === 1 ? '' : 's'} of yours. Each device is turned on and off on its own.

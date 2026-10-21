@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { scrollIntoStrip } from '../../../public/js/format.js';
 import { Icon } from '../components/Icon.jsx';
 import { useFamilies } from '../hooks/useFamilies.js';
 import { NoFamilyState } from '../components/family/NoFamilyState.jsx';
@@ -9,6 +10,7 @@ import { MembersTab } from '../components/family/MembersTab.jsx';
 import { ChatTab } from '../components/family/ChatTab.jsx';
 import { ShoppingTab } from '../components/family/ShoppingTab.jsx';
 import { ActivityTab } from '../components/family/ActivityTab.jsx';
+import { InvitationsForMe } from '../components/family/Invitations.jsx';
 
 const TABS = [
   ['overview', 'Overview'],
@@ -80,6 +82,12 @@ export function Family({ ctx }) {
     // every time the user switches tabs/families themselves.
   }, [families]);
 
+  // The chosen section is brought into view inside the strip, on load and whenever it changes.
+  useEffect(() => {
+    const tab = document.getElementById(`family-tab-${activeTab}`);
+    scrollIntoStrip(tab && tab.parentElement, tab);
+  }, [activeTab, families]);
+
   function openCreate() {
     openCreateFamilyModal({
       api,
@@ -132,7 +140,7 @@ export function Family({ ctx }) {
   }
 
   if (!families.length) {
-    return <NoFamilyState onCreate={openCreate} onJoin={openJoin} />;
+    return <NoFamilyState onCreate={openCreate} onJoin={openJoin} extra={<InvitationsForMe api={api} toast={toast} onChanged={refetch} />} />;
   }
 
   const currentFamily = families.find((f) => f.id === activeFamilyId) || families[0];
@@ -168,6 +176,8 @@ export function Family({ ctx }) {
           </button>
         </div>
       </div>
+
+      <InvitationsForMe api={api} toast={toast} onChanged={refetch} />
 
       {/* Visual Redesign Batch 5: module-accent--warmth added to the
           wrapper only — every role="tablist"/"tab", aria-selected,

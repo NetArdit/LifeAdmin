@@ -27,7 +27,16 @@ export function SecuritySection({ ctx }) {
     }
   }
 
-  function openVerify(channel) {
+  async function openVerify(channel) {
+    if (channel === 'email') {
+      try {
+        const r = await api.post('/api/auth/verify-email/resend', {});
+        toast(r.alreadyVerified ? 'Your email is already confirmed.' : r.message, r.delivered === false ? 'error' : 'success');
+      } catch (err) {
+        toast((err && err.message) || 'Could not send the link', 'error');
+      }
+      return;
+    }
     openVerifyModal({ api, toast, state, channel, onVerified: () => forceUpdate((n) => n + 1) });
   }
 
@@ -56,7 +65,7 @@ export function SecuritySection({ ctx }) {
           <span className="card-title">Verification</span>
         </div>
         <p className="text-sm muted" style={{ marginBottom: 'var(--sp-3)' }}>
-          Real SMS/email delivery requires an external provider — this is not configured in the local demo. You can still test the verification flow: a code is generated and shown to you directly (demo mode).
+          Email: we send a confirmation link to your address; it proves the address is yours and unlocks inviting people by email. Phone: real SMS needs a paid provider, so the phone check stays a demo (the code is shown to you here) and proves nothing.
         </p>
         <div className="row" style={{ gap: 'var(--sp-4)' }}>
           <VerifyRow channel="phone" verified={state.user.phoneVerified} onVerify={openVerify} />
@@ -75,7 +84,7 @@ function VerifyRow({ channel, verified, onVerify }) {
       </span>
       {!verified ? (
         <button className="btn btn-sm" onClick={() => onVerify(channel)}>
-          Verify now
+          {channel === 'email' ? 'Send confirmation link' : 'Verify now'}
         </button>
       ) : null}
     </div>

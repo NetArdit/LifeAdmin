@@ -141,6 +141,12 @@ router.get(
       decisions: await db.all('SELECT * FROM decisions WHERE owner_id = ?', [userId]),
       goals: await db.all('SELECT * FROM goals WHERE owner_id = ?', [userId]),
       ecoLogs: await db.all('SELECT * FROM eco_logs WHERE owner_id = ?', [userId]),
+      routines: await db.all('SELECT * FROM routines WHERE owner_id = ?', [userId]),
+      routineCheckins: await db.all('SELECT rc.* FROM routine_checkins rc JOIN routines r ON r.id = rc.routine_id WHERE r.owner_id = ?', [userId]),
+      // The person's own private Reflection conversations (and what was suggested in them).
+      reflectionConversations: await db.all('SELECT * FROM reflection_conversations WHERE user_id = ?', [userId]),
+      reflectionMessages: await db.all('SELECT m.* FROM reflection_messages m JOIN reflection_conversations c ON c.id = m.conversation_id WHERE c.user_id = ?', [userId]),
+      reflectionProposals: await db.all('SELECT id, conversation_id, kind, payload, status, created_type, created_id, created_at, decided_at FROM reflection_proposals WHERE user_id = ?', [userId]),
       // The invite code is an owner-controlled credential: only a family's owner gets it.
       families: (await db
         .all(

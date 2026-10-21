@@ -21,6 +21,7 @@ const db = require('../db');
 const reminders = require('./reminders');
 const { notifyUser } = require('./notify');
 const { withAfterCommit } = require('./afterCommit');
+const { pickMotivation } = require('./motivation');
 
 const BATCH = 50;
 const LEASE_SECONDS = 120;
@@ -62,6 +63,14 @@ async function finish(row, token, status, error = null) {
   return done.changes === 1;
 }
 
+/** The encouraging line for a goal reminder: from local templates (no AI), never the one this person got last. */
+async function motivationFor(userId, goal, isStep) {
+  const user = await db.get('SELECT timezone FROM users WHERE id = ?', [userId]);
+  const today = reminders.wallAt(Date.now(), reminders.zoneOf(user)).date;
+  const prev = await db.get("SELECT template_key FROM notifications WHERE user_id = ? AND template_key IS NOT NULL ORDER BY id DESC LIMIT 1", [userId]);
+  return pickMotivation({ goal, isStep, today, last: prev ? prev.template_key : null });
+}
+
 /** What the bell says. Read from the item at the moment of sending, never stored with the plan. */
 async function bellFor(row) {
   if (row.source_type === 'task') {
@@ -78,19 +87,29 @@ async function bellFor(row) {
     const today = row.rule_key === 'before:0';
     return d && { type: 'document', title: today ? 'Reminder: a document expires today' : 'Reminder: a document expires soon', body: `${d.title} · valid until ${d.expires_on}`, link: '#/documents' };
   }
-  if (row.source_type === 'goal') {
-    const g = await db.get('SELECT title, target_date FROM goals WHERE id = ?', [row.source_id]);
-    return g && { type: 'goal', title: 'Reminder: goal date is near', body: `${g.title} · ${g.target_date}`, link: `#/goals/${row.source_id}` };
+  if (row.source_type === 'routine') {
+    const r = await db.get('SELECT title, kind FROM routines WHERE id = ?', [row.source_id]);
+    // A reminder only: the words never say that something was done.
+    return r && { type: 'routine', title: 'Routine reminder', body: r.title, link: '#/routines' };
   }
-  const m = await db.get('SELECT m.title, m.due_date, m.goal_id, g.title AS goal_title FROM goal_milestones m JOIN goals g ON g.id = m.goal_id WHERE m.id = ?', [row.source_id]);
-  return m && { type: 'goal', title: 'Reminder: next step of a goal', body: `${m.title} · ${m.goal_title}`, link: `#/goals/${m.goal_id}` };
+  if (row.source_type === 'goal') {
+    const g = await db.get('SELECT * FROM goals WHERE id = ?', [row.source_id]);
+    if (!g) return null;
+    const line = await motivationFor(row.user_id, g, false);
+    return { type: 'goal', title: 'Reminder: goal date is near', body: `${g.title} · ${line.text}`, link: `#/goals/${row.source_id}`, pushKind: 'goal', pushText: line.text, templateKey: line.key };
+  }
+  const m = await db.get('SELECT m.title, m.due_date, m.goal_id FROM goal_milestones m WHERE m.id = ?', [row.source_id]);
+  if (!m) return null;
+  const goal = await db.get('SELECT * FROM goals WHERE id = ?', [m.goal_id]);
+  const line = await motivationFor(row.user_id, goal, true);
+  return { type: 'goal', title: 'Reminder: next step of a goal', body: `${m.title} · ${goal.title} · ${line.text}`, link: `#/goals/${m.goal_id}`, pushKind: 'goal', pushText: line.text, templateKey: line.key };
 }
 
 async function deliverToBell(row) {
   const bell = await bellFor(row);
   // The bell row is written here, in the row's own transaction; the push to the person's devices is sent by
   // notifyUser after that transaction has committed (see handle).
-  if (bell) await notifyUser(row.user_id, { ...bell, pushKind: 'reminder' });
+  if (bell) await notifyUser(row.user_id, { pushKind: 'reminder', ...bell });
 }
 
 /**
@@ -138,6 +157,12 @@ async function housekeeping() {
 /** One run of the clock. Answers counts only. */
 async function runDue(options = {}) {
   const started = Date.now();
+  // The window of routine occurrences moves forward first, so that what is due now has its rows.
+  try {
+    await reminders.replanAllRoutines(options.now);
+  } catch (err) {
+    console.error('[reminders] routines could not be planned:', (err && (err.code || err.name)) || 'error');
+  }
   const { token, rows } = await claimDue(options);
   const counts = { claimed: rows.length, sent: 0, cancelled: 0, retry: 0, failed: 0, lost: 0, released: 0 };
   for (const row of rows) {

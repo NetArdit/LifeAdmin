@@ -113,10 +113,37 @@ function uniqueUser(overrides = {}) {
   };
 }
 
+// Signup answers 202 and starts no session (it answers the same for an address that already has an account).
+// Most tests only need a signed-in person, so this signs in with the same credentials and returns THAT answer
+// (200, { user }). A signup that was refused (400, 429) is returned as it was.
 async function signUp(client, overrides = {}) {
   const payload = uniqueUser(overrides);
-  const res = await client.post('/api/auth/signup', payload);
+  // A whole test run signs up from one address; the per-address allowance is not what these tests are about.
+  await require('../src/lib/authLimits').limits.signupIp.resetAll();
+  const signup = await client.post('/api/auth/signup', payload);
+  if (signup.status !== 202) return { res: signup, payload };
+  const res = await client.post('/api/auth/login', { identifier: payload.email, password: payload.password });
   return { res, payload };
 }
 
-module.exports = { startApp, makeClient, uniqueUser, signUp };
+// The link in the newest confirmation email sent to `email` (the test mail transport keeps mail in memory,
+// in this same process). Returns the raw token, or null.
+function verificationTokenFor(email) {
+  const { getOutbox } = require('../src/lib/mailer');
+  const mail = getOutbox().filter((m) => m.to === email && /verify-email\//.test(m.text)).pop();
+  const found = mail && /verify-email\/([A-Za-z0-9_-]+)/.exec(mail.text);
+  return found ? found[1] : null;
+}
+
+// Signs the client's user in and confirms their email through the real link flow.
+async function verifyEmailOf(client, email) {
+  // Many people confirm from one address in a test run: this limit is not what these tests are about.
+  await require('../src/lib/authLimits').limits.verifyConfirm.resetAll();
+  await client.post('/api/auth/verify-email/resend', {});
+  const token = verificationTokenFor(email);
+  if (!token) throw new Error('no confirmation email was sent to ' + email);
+  const res = await client.post('/api/auth/verify-email', { token });
+  if (res.status !== 200) throw new Error('email confirmation failed: ' + JSON.stringify(res.data));
+}
+
+module.exports = { startApp, makeClient, uniqueUser, signUp, verificationTokenFor, verifyEmailOf };

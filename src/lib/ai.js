@@ -386,6 +386,7 @@ async function readDocument({ contentType, data, today }) {
 }
 
 module.exports = {
+  callStructured,
   readDocument,
   providerName,
   isConfigured,

@@ -37,11 +37,11 @@ test('account recovery + auth hardening', async (t) => {
   // --- pre-existing bug verification: OTP expiry ---------------------------
   await t.test('verification code that expired earlier the same day is rejected', async () => {
     const { c } = await newUser();
-    const req = await c.post('/api/auth/verify/email/request', {});
+    const req = await c.post('/api/auth/verify/phone/request', {});
     const code = req.data.demoCode;
     const past = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     await db.run("UPDATE otp_codes SET expires_at = ? WHERE code = ?", [past, code]);
-    const res = await c.post('/api/auth/verify/email/confirm', { code });
+    const res = await c.post('/api/auth/verify/phone/confirm', { code });
     assert.equal(res.status, 400, 'an expired verification code must not be accepted');
   });
 
@@ -163,9 +163,9 @@ test('account recovery + auth hardening', async (t) => {
 
   await t.test('verification-code confirmation is locked after repeated wrong codes', async () => {
     const { c } = await newUser();
-    await c.post('/api/auth/verify/email/request', {});
-    for (let i = 0; i < 10; i++) assert.equal((await c.post('/api/auth/verify/email/confirm', { code: '00000' + (i % 10) })).status, 400);
-    assert.equal((await c.post('/api/auth/verify/email/confirm', { code: '000000' })).status, 429);
+    await c.post('/api/auth/verify/phone/request', {});
+    for (let i = 0; i < 10; i++) assert.equal((await c.post('/api/auth/verify/phone/confirm', { code: '00000' + (i % 10) })).status, 400);
+    assert.equal((await c.post('/api/auth/verify/phone/confirm', { code: '000000' })).status, 429);
   });
 
   await t.test('login by an unknown identifier takes comparable time to a wrong password (no cheap timing oracle)', async () => {
@@ -189,6 +189,7 @@ test('account recovery + auth hardening', async (t) => {
   // --- mail transport + reset URL configuration -------------------------------
   await t.test('with no mail provider (transport "none") the response is unchanged and nothing is sent', async () => {
     const { payload } = await newUser();
+    mailer.clearOutbox(); // signup itself sends a confirmation link
     process.env.MAIL_TRANSPORT = 'none';
     try {
       const res = await makeClient(app.base).post('/api/auth/forgot-password', { email: payload.email });
@@ -201,6 +202,7 @@ test('account recovery + auth hardening', async (t) => {
 
   await t.test('production: no APP_BASE_URL or a non-https one builds no link and sends nothing; https base is used verbatim', async () => {
     const { payload } = await newUser();
+    mailer.clearOutbox(); // signup itself sends a confirmation link
     const prev = { env: process.env.NODE_ENV, base: process.env.APP_BASE_URL, mt: process.env.MAIL_TRANSPORT };
     process.env.NODE_ENV = 'production';
     process.env.MAIL_TRANSPORT = 'outbox'; // only so a send would be observable
@@ -255,7 +257,8 @@ test('account recovery + auth hardening', async (t) => {
       process.env.NODE_ENV = nodeEnv;
       try {
         const payload = { firstName: 'C', lastName: 'K', email: `cookie.${nodeEnv}.${Date.now()}@example.test`, phone: '+38344' + String(Math.floor(100000 + Math.random() * 899999)), password: 'cookiepass123', confirmPassword: 'cookiepass123' };
-        const res = await fetch(app.base + '/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        await fetch(app.base + '/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const res = await fetch(app.base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: payload.email, password: payload.password }) });
         return res.headers.get('set-cookie');
       } finally {
         process.env.NODE_ENV = prev;
