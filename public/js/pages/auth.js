@@ -109,9 +109,9 @@ export async function mount(root, onAuthed) {
 
   // A plain link: the browser leaves for Google and comes back to the server's callback, which sets the session.
   function googleButton() {
-    // Always shown: a Google (Gmail) account signs in or signs up in one press, with no email and password to type.
-    // Until the site's Google keys are set the server answers with a clear message instead (google_unavailable).
-    void googleOn;
+    // Shown only when the site has its Google keys (/api/config googleConfigured): a Google (Gmail) account then
+    // signs in or signs up in one press, with no email and password to type.
+    if (!googleOn) return '';
     return `<p class="muted text-sm" style="text-align:center;margin:var(--sp-4) 0 var(--sp-2)">or</p>
       <a class="btn btn-block btn-lg" id="google-btn" href="/api/auth/google/start"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.5 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.8-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.7-4.2-13.6-9.9l-7.8 6.1C6.500 42.600 14.600 48 24 48z"/></svg> Sign in with Google</a>`;
   }
